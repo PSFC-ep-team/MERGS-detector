@@ -4,48 +4,31 @@ import os
 import subprocess
 import xml.etree.ElementTree as xml
 
-from numpy import inf, genfromtxt, count_nonzero
+from numpy import genfromtxt
 
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 
-def moliere_radius(material: str) -> float:
-	""" calculate the Moliere radius of a material """
-	pass
-
-
-def plot_sensitivity_curves(detector: Detector) -> None:
-	""" calculate the sensitivity of a detector to all types and energies of radiation """
-	pass
-
-
-def sensitivity(detector: Detector, particle: Beam) -> float:
-	""" calculate the fraction of these incident particles that are detected by this detector """
-	tracks = simulate(detector, particle)
-	return count_nonzero(
-		(tracks["E_deposited"] >= detector.lower_threshold) &
-		(tracks["E_deposited"] <= detector.upper_threshold)
-	)/tracks.size
-
-
-def simulate(detector: Detector, particle: Beam):
-	""" run a Geant4 simulation of a beam of these particles hitting this detector """
+def simulate(material: str, detectors: list[Solid], particle: Beam):
+	""" run a Geant4 simulation of a beam of these particles hitting a dector """
 	input_deck = xml.Element("gdml", {
 		"xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
 		"xsi:noNamespaceSchemaLocation": os.path.expanduser("~/grasshopper/schema/gdml.xsd"),
 	})
 
 	# specify the detector material
+	density = MATERIAL_DATA[material]["density"]
+	elements = MATERIAL_DATA[material]["elements"]
 	materials = xml.SubElement(input_deck, "materials")
-	for element in detector.elements.keys() | {"N"}:
+	for element in elements.keys() | {"N"}:
 		element_info = xml.SubElement(
 			materials, "element", Z=f"{ELEMENT_DATA[element][0]}", name=element)
 		xml.SubElement(
 			element_info, "atom", value=f"{ELEMENT_DATA[element][1]}", unit="g/mole")
 	material_info = xml.SubElement(
-		materials, "material", name=detector.material_name, state="solid")
-	xml.SubElement(material_info, "D", value=f"{detector.density}", unit="g/cm3")
-	for element, abundance in detector.elements.items():
+		materials, "material", name=material, state="solid")
+	xml.SubElement(material_info, "D", value=f"{density}", unit="g/cm3")
+	for element, abundance in elements.items():
 		xml.SubElement(material_info, "composite", ref=element, n=f"{abundance}")
 	material_info = xml.SubElement(
 		materials, "material", name="vacuum", state="gas")
@@ -86,22 +69,27 @@ def simulate(detector: Detector, particle: Beam):
 
 	# specify the detector geometry
 	solids = xml.SubElement(input_deck, "solids")
-	xml.SubElement(solids, "box", name="detector",
-	               x=f"{detector.width}", y="100", z=f"{detector.depth}", lunit="mm")
+	for i, detector in enumerate(detectors):
+		xml.SubElement(solids, detector.kind, name=f"detector{i}",
+		               lunit="mm", **{key: f"{value}" for key, value in detector.kwargs.items()})
 	xml.SubElement(solids, "box", name="infinite_void",
 	               x="300", y="300", z="300", lunit="mm")
 
 	# fill in the remaining information
 	structure = xml.SubElement(input_deck, "structure")
-	detector_volume = xml.SubElement(structure, "volume", name="detector_log")
-	xml.SubElement(detector_volume, "materialref", ref=detector.material_name)
-	xml.SubElement(detector_volume, "solidref", ref="detector")
+	for i, detector in enumerate(detectors):
+		detector_volume = xml.SubElement(structure, "volume", name=f"detector{i}_log")
+		xml.SubElement(detector_volume, "materialref", ref=material)
+		xml.SubElement(detector_volume, "solidref", ref=f"detector{i}")
 	world_volume = xml.SubElement(structure, "volume", name="world_log")
 	xml.SubElement(world_volume, "materialref", ref="vacuum")
 	xml.SubElement(world_volume, "solidref", ref="infinite_void")
-	detector_specification = xml.SubElement(world_volume, "physvol", name="det_phys69")
-	xml.SubElement(detector_specification, "volumeref", ref="detector_log")
-	xml.SubElement(detector_specification, "position", name="detector_pos", x="0", y="0", z="0", unit="mm")
+	for i, detector in enumerate(detectors):
+		detector_specification = xml.SubElement(world_volume, "physvol", name=f"det_phys{i}")
+		xml.SubElement(detector_specification, "volumeref", ref=f"detector{i}_log")
+		xml.SubElement(
+			detector_specification, "position", name=f"detector{i}_pos", unit="mm",
+			x=f"{detector.x_position}", y=f"{detector.y_position}", z=f"{detector.z_position}")
 
 	# and then whatever this is
 	setup = xml.SubElement(input_deck, "setup", name="Default", version="1.0")
@@ -126,23 +114,13 @@ def simulate(detector: Detector, particle: Beam):
 	return output_data
 
 
-class Detector:
-	def __init__(self, material: str, width: float, depth: float, lower_threshold=0., upper_threshold=inf):
-		"""
-		a single channel of an electron detector
-		:param material: the name of the detection material
-		:param width: the scale of the detector in the dispersive direction (mm)
-		:param depth: the scale of the detector in the beam direction (mm)
-		:param lower_threshold: the minimum amount of energy in a pulse to be detected (MeV)
-		:param upper_threshold: the maximum amount of energy in a pulse to be detected (MeV)
-		"""
-		self.material_name = material
-		self.density = MATERIAL_DATA[material]["density"]  # g/cm³
-		self.elements = MATERIAL_DATA[material]["elements"]
-		self.width = width
-		self.depth = depth
-		self.lower_threshold = lower_threshold
-		self.upper_threshold = upper_threshold
+class Solid:
+	def __init__(self, kind: str, x_position: float, y_position: float, z_position: float, **kwargs: float):
+		self.kind = kind
+		self.x_position = x_position
+		self.y_position = y_position
+		self.z_position = z_position
+		self.kwargs = kwargs
 
 
 class Beam:
@@ -157,7 +135,3 @@ class Beam:
 		self.charge = PARTICLE_DATA[particle]["charge"]  # e
 		self.number = PARTICLE_DATA[particle]["number"]
 		self.energy = energy
-
-
-if __name__ == "__main__":
-	print(sensitivity(Detector("LaBr₃", 10, 30, lower_threshold=8.25), Beam("electron", 16.5)))
