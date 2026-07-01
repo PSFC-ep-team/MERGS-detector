@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from numpy import count_nonzero, inf
+import os
+
+from matplotlib import pyplot as plt
+from numpy import count_nonzero, inf, linspace, empty_like
 
 from data import MATERIAL_DATA
 from simulation import Beam, simulate, Solid
@@ -8,7 +11,23 @@ from simulation import Beam, simulate, Solid
 
 def plot_sensitivity_curves(detector: Detector) -> None:
 	""" calculate the sensitivity of a detector to all types and energies of radiation """
-	pass
+	energies = linspace(1, 17, 18)
+	plt.figure()
+	for particle, color in [("electron", "tab:orange"), ("photon", "tab:green"), ("neutron", "tab:gray")]:
+		sensitivities = empty_like(energies)
+		for i, energy in enumerate(energies):
+			print(f"{energy:.2g} MeV {particle}s")
+			sensitivities[i] = sensitivity(detector, Beam(particle, energy))
+		plt.plot(energies, sensitivities, color=color, label=particle)
+	os.makedirs("figures", exist_ok=True)
+	plt.legend()
+	plt.grid()
+	plt.xlabel("Incident energy")
+	plt.ylabel("Sensitivity")
+	plt.ylim(0, 1)
+	plt.xlim(0, 18)
+	plt.savefig("figures/sensitivity_curves.pdf")
+	plt.show()
 
 
 def sensitivity(detector: Detector, particle: Beam) -> float:
@@ -22,8 +41,8 @@ def sensitivity(detector: Detector, particle: Beam) -> float:
 		)],
 		particle)
 	return count_nonzero(
-		(tracks["E_deposited"] >= detector.lower_threshold) &
-		(tracks["E_deposited"] <= detector.upper_threshold)
+		(tracks["E_depositedMeV"] >= detector.lower_threshold) &
+		(tracks["E_depositedMeV"] <= detector.upper_threshold)
 	)/tracks.size
 
 
@@ -47,4 +66,4 @@ class Detector:
 
 
 if __name__ == "__main__":
-	print(sensitivity(Detector("LaBr₃", 10, 30, lower_threshold=8.25), Beam("electron", 16.5)))
+	plot_sensitivity_curves(Detector("LaBr₃", 10, 30, lower_threshold=8.25))

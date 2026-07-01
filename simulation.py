@@ -5,11 +5,12 @@ import subprocess
 import xml.etree.ElementTree as xml
 
 from numpy import genfromtxt
+from numpy.typing import NDArray
 
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 
-def simulate(material: str, detectors: list[Solid], particle: Beam):
+def simulate(material: str, detectors: list[Solid], beam: Beam) -> NDArray:
 	""" run a Geant4 simulation of a beam of these particles hitting a dector """
 	input_deck = xml.Element("gdml", {
 		"xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
@@ -49,9 +50,9 @@ def simulate(material: str, detectors: list[Solid], particle: Beam):
 	xml.SubElement(definitions, "quantity",
 	               name="ProductionLowLimit", type="threshold", value="1", unit="keV")
 	# output filters?
-	xml.SubElement(definitions, "constant", name="SaveSurfaceHitTrack", value="0")
+	xml.SubElement(definitions, "constant", name="SaveSurfaceHitTrack", value="1")
 	xml.SubElement(definitions, "constant", name="SaveTrackInfo", value="0")
-	xml.SubElement(definitions, "constant", name="SaveEdepositedTotalEntry", value="1")
+	xml.SubElement(definitions, "constant", name="SaveEdepositedTotalEntry", value="0")
 	# bean definition?
 	xml.SubElement(definitions, "constant", name="RandomGenSeed", value="0")
 	xml.SubElement(definitions, "quantity",
@@ -63,9 +64,9 @@ def simulate(material: str, detectors: list[Solid], particle: Beam):
 	xml.SubElement(definitions, "quantity",
 	               name="BeamSize", type="coordinate", value="0", unit="mm")
 	xml.SubElement(definitions, "quantity",
-	               name="BeamEnergy", type="energy", value=f"{particle.energy}", unit="MeV")
+	               name="BeamEnergy", type="energy", value=f"{beam.energy}", unit="MeV")
 	xml.SubElement(definitions, "constant", name="EventsToRun", value="10000")
-	xml.SubElement(definitions, "constant", name="ParticleNumber", value=f"{particle.number}")
+	xml.SubElement(definitions, "constant", name="ParticleNumber", value=f"{beam.number}")
 
 	# specify the detector geometry
 	solids = xml.SubElement(input_deck, "solids")
@@ -103,14 +104,10 @@ def simulate(material: str, detectors: list[Solid], particle: Beam):
 
 	subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run")
 
-	columns = [  # normally genfromtxt would be able to do this automaticly but Areg made the header wrong so I have to manually specify what the columns actually are
-		("E_beam", float), ("E_incident", float), ("E_deposited", float),
-		("x_incident", float), ("y_incident", float), ("z_incident", float), ("theta", float),
-		("Time", float), ("EventID", int), ("TrackID", int), ("ParticleID", int),
-		("ParticleName", str), ("CreatorProcessName", str),
-		("IsEdepositedTotalEntry", int), ("IsSurfaceHitTrack", int),
-	]
-	output_data = genfromtxt("run/output.dat", skip_header=1, dtype=columns)
+	try:
+		output_data = genfromtxt("run/output.dat", names=True, comments=None)
+	except FileNotFoundError:
+		raise RuntimeError("Geant4 failed to run.")
 	return output_data
 
 

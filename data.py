@@ -2,44 +2,44 @@ MATERIAL_DATA = {
 	"LaBr₃": {
 		"density": 5.06,
 		"elements": {
-			"La": 1.0,
-			"Br": 3.0,
+			"La": 1,
+			"Br": 3,
 		},
 	},
 	"LYSO": {
 		"density": 7.1,
 		"elements": {
-			"Lu": 1.8,
-			"Y": 0.2,
-			"Si": 1.0,
-			"O": 5.0,
+			"Lu": 18,
+			"Y": 2,
+			"Si": 10,
+			"O": 50,
 		}
 	},
 	"EJ-276": {
 		"density": 1.096,
 		"elements": {
-			"C": 4.906,
-			"H": 4.546,
+			"C": 491,
+			"H": 455,
 		}
 	},
 	"EJ-100": {
 		"density": 1.03,
 		"elements": {
-			"C": 4.68,
-			"H": 5.16,
+			"C": 468,
+			"H": 516,
 		}
 	},
 	"quartz": {
 		"density": 2.65,
 		"elements": {
-			"Si": 1.0,
-			"O": 2.0,
+			"Si": 1,
+			"O": 2,
 		}
 	},
 	"silicon": {
 		"density": 7.992,
 		"elements": {
-			"Si": 1.0,
+			"Si": 1,
 		}
 	},
 }
