@@ -50,8 +50,8 @@ def simulate(material: str, detectors: list[Solid], beam: Beam) -> NDArray:
 	xml.SubElement(definitions, "quantity",
 	               name="ProductionLowLimit", type="threshold", value="1", unit="keV")
 	# output filters?
-	xml.SubElement(definitions, "constant", name="SaveSurfaceHitTrack", value="1")
-	xml.SubElement(definitions, "constant", name="SaveTrackInfo", value="0")
+	xml.SubElement(definitions, "constant", name="SaveSurfaceHitTrack", value="0")
+	xml.SubElement(definitions, "constant", name="SaveTrackInfo", value="1")
 	xml.SubElement(definitions, "constant", name="SaveEdepositedTotalEntry", value="0")
 	# bean definition?
 	xml.SubElement(definitions, "constant", name="RandomGenSeed", value="0")

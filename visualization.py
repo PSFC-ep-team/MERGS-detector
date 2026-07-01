@@ -1,3 +1,4 @@
+from math import floor
 import os
 
 from matplotlib import pyplot as plt
@@ -19,8 +20,8 @@ def plot_energy_deposition(material: str, beam: Beam, width: float, depth: float
 	:param width: the scale of the detector in the dispersive direction (mm)
 	:param depth: the scale of the detector in the beam direction (mm)
 	"""
-	x_edges = linspace(-width/2, width/2, round(10*sqrt(width/depth)) + 1)
-	z_edges = linspace(0, depth, round(10*sqrt(depth/width)) + 1)
+	x_edges = linspace(-width/2, width/2, floor(10*sqrt(width/depth)) + 1)
+	z_edges = linspace(0, depth, floor(10*sqrt(depth/width)) + 1)
 	x_positions = (x_edges[0:-1] + x_edges[1:])/2
 	z_positions = (z_edges[0:-1] + z_edges[1:])/2
 	x_sizes = diff(x_edges)
