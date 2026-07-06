@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 
 from matplotlib import pyplot as plt
-from numpy import count_nonzero, inf, linspace, empty_like
+from numpy import count_nonzero, inf, linspace, empty_like, histogram, arange
+from numpy.typing import NDArray
 
 from data import MATERIAL_DATA
 from simulation import Beam, simulate, Solid
@@ -30,8 +31,18 @@ def plot_sensitivity_curves(detector: Detector) -> None:
 	plt.show()
 
 
-def sensitivity(detector: Detector, particle: Beam) -> float:
+def sensitivity(detector: Detector, beam: Beam) -> float:
 	""" calculate the fraction of these incident particles that are detected by this detector """
+	energy_deposited = response(detector, beam)
+	return count_nonzero(
+		(energy_deposited >= detector.lower_threshold) &
+		(energy_deposited <= detector.upper_threshold)
+	)/energy_deposited.size
+
+
+def response(detector: Detector, beam: Beam) -> NDArray:
+	""" run a simulation for this detector and extract the total energy deposition of each particle """
+	# TODO: account for spacial and angular extent of the beam
 	tracks = simulate(
 		detector.material_name,
 		[Solid(
@@ -39,11 +50,8 @@ def sensitivity(detector: Detector, particle: Beam) -> float:
 			x=detector.width, y=100, z=detector.depth,
 			x_position=0, y_position=0, z_position=0,
 		)],
-		particle)
-	return count_nonzero(
-		(tracks["E_depositedMeV"] >= detector.lower_threshold) &
-		(tracks["E_depositedMeV"] <= detector.upper_threshold)
-	)/tracks.size
+		beam)
+	return histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(tracks["EventID"].max() + 2))[0]
 
 
 class Detector:
