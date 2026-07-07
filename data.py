@@ -13,34 +13,48 @@ MATERIAL_DATA = {
 			"Y": 2,
 			"Si": 10,
 			"O": 50,
-		}
+		},
 	},
 	"EJ-276": {
 		"density": 1.096,
 		"elements": {
 			"C": 491,
 			"H": 455,
-		}
+		},
 	},
 	"EJ-100": {
 		"density": 1.03,
 		"elements": {
 			"C": 468,
 			"H": 516,
-		}
+		},
 	},
 	"quartz": {
 		"density": 2.65,
 		"elements": {
 			"Si": 1,
 			"O": 2,
-		}
+		},
+	},
+	"aluminum": {
+		"density": 2.699,
+		"elements": {
+			"Al": 1,
+		},
 	},
 	"silicon": {
 		"density": 7.992,
 		"elements": {
 			"Si": 1,
-		}
+		},
+	},
+	"PMMA": {
+		"density": 1.18,
+		"elements": {
+			"C": 5,
+			"H": 8,
+			"O": 2,
+		},
 	},
 }
 
@@ -49,6 +63,7 @@ ELEMENT_DATA = {
 	"C": (6, 12.001),
 	"N": (7, 14.007),
 	"O": (8, 15.999),
+	"Al": (13, 26.982),
 	"Si": (14, 28.086),
 	"Br": (35, 79.904),
 	"Y": (39, 88.906),

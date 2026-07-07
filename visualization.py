@@ -1,3 +1,5 @@
+""" some cool plots of energy deposition by electron beams in solids """
+
 import os
 
 from matplotlib import pyplot as plt
@@ -58,7 +60,6 @@ def plot_heatmap(detector: Detector, beam: Beam) -> None:
 			grid.append(Solid(
 				"box",
 				x_position=x_positions[i],
-				y_position=0,
 				z_position=z_positions[j],
 				x=x_sizes[i],
 				y=100,
@@ -79,5 +80,5 @@ def plot_heatmap(detector: Detector, beam: Beam) -> None:
 
 if __name__ == "__main__":
 	print(moliere_radius("LYSO"))
-	plot_histogram(Detector("EJ-276", 50, 80), Beam("electron", 16.7))
-	plot_heatmap(Detector("EJ-276", 50, 80), Beam("electron", 16.7))
+	# plot_histogram(Detector("EJ-276", 50, 80), Beam("electron", 16.7))
+	plot_heatmap(Detector("EJ-100", 6, 10), Beam("electron", 2.5))

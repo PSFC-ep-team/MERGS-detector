@@ -1,3 +1,5 @@
+""" a function to facilitate building simple Grasshopper input decks """
+
 from __future__ import annotations
 
 import os
@@ -10,27 +12,33 @@ from numpy.typing import NDArray
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 
-def simulate(material: str, detectors: list[Solid], beam: Beam) -> NDArray:
-	""" run a Geant4 simulation of a beam of these particles hitting a dector """
+def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray:
+	""" run a Geant4 simulation of a beam of these particles hitting a detector """
 	input_deck = xml.Element("gdml", {
 		"xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
 		"xsi:noNamespaceSchemaLocation": os.path.expanduser("~/grasshopper/schema/gdml.xsd"),
 	})
 
-	# specify the detector material
-	density = MATERIAL_DATA[material]["density"]
-	elements = MATERIAL_DATA[material]["elements"]
-	materials = xml.SubElement(input_deck, "materials")
-	for element in elements.keys() | {"N"}:
-		element_info = xml.SubElement(
-			materials, "element", Z=f"{ELEMENT_DATA[element][0]}", name=element)
-		xml.SubElement(
-			element_info, "atom", value=f"{ELEMENT_DATA[element][1]}", unit="g/mole")
-	material_info = xml.SubElement(
-		materials, "material", name=material, state="solid")
-	xml.SubElement(material_info, "D", value=f"{density}", unit="g/cm3")
-	for element, abundance in elements.items():
-		xml.SubElement(material_info, "composite", ref=element, n=f"{abundance}")
+	# first apply detector_material to every detector solid
+	for solid in solids:
+		if solid.material == "detector":
+			solid.material = detector_material
+
+	# specify the materials
+	for material in {solid.material for solid in solids}:
+		density = MATERIAL_DATA[material]["density"]
+		elements = MATERIAL_DATA[material]["elements"]
+		materials = xml.SubElement(input_deck, "materials")
+		for element in elements.keys() | {"N"}:
+			element_info = xml.SubElement(
+				materials, "element", Z=f"{ELEMENT_DATA[element][0]}", name=element)
+			xml.SubElement(
+				element_info, "atom", value=f"{ELEMENT_DATA[element][1]}", unit="g/mole")
+		material_info = xml.SubElement(
+			materials, "material", name=material, state="solid")
+		xml.SubElement(material_info, "D", value=f"{density}", unit="g/cm3")
+		for element, abundance in elements.items():
+			xml.SubElement(material_info, "composite", ref=element, n=f"{abundance}")
 	material_info = xml.SubElement(
 		materials, "material", name="vacuum", state="gas")
 	xml.SubElement(material_info, "D", value="1e-25", unit="g/cm3")
@@ -62,35 +70,36 @@ def simulate(material: str, detectors: list[Solid], beam: Beam) -> NDArray:
 	xml.SubElement(definitions, "quantity",
 	               name="BeamOffsetZ", type="coordinate", value="-100", unit="mm")
 	xml.SubElement(definitions, "quantity",
-	               name="BeamSize", type="coordinate", value="0", unit="mm")
+	               name="BeamSize", type="coordinate", value=f"{beam.width}", unit="mm")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamEnergy", type="energy", value=f"{beam.energy}", unit="MeV")
 	xml.SubElement(definitions, "constant", name="EventsToRun", value="10000")
 	xml.SubElement(definitions, "constant", name="ParticleNumber", value=f"{beam.number}")
 
-	# specify the detector geometry
-	solids = xml.SubElement(input_deck, "solids")
-	for i, detector in enumerate(detectors):
-		xml.SubElement(solids, detector.kind, name=f"detector{i}",
-		               lunit="mm", **{key: f"{value}" for key, value in detector.kwargs.items()})
-	xml.SubElement(solids, "box", name="infinite_void",
+	# specify the geometry
+	solid_group = xml.SubElement(input_deck, "solids")
+	for i, solid in enumerate(solids):
+		xml.SubElement(solid_group, solid.kind, name=f"solid{i}",
+		               lunit="mm", **{key: f"{value}" for key, value in solid.kwargs.items()})
+	xml.SubElement(solid_group, "box", name="infinite_void",
 	               x="300", y="300", z="300", lunit="mm")
 
 	# fill in the remaining information
 	structure = xml.SubElement(input_deck, "structure")
-	for i, detector in enumerate(detectors):
-		detector_volume = xml.SubElement(structure, "volume", name=f"detector{i}_log")
-		xml.SubElement(detector_volume, "materialref", ref=material)
-		xml.SubElement(detector_volume, "solidref", ref=f"detector{i}")
+	for i, solid in enumerate(solids):
+		volume = xml.SubElement(structure, "volume", name=f"solid{i}_log")
+		xml.SubElement(volume, "materialref", ref=solid.material)
+		xml.SubElement(volume, "solidref", ref=f"solid{i}")
 	world_volume = xml.SubElement(structure, "volume", name="world_log")
 	xml.SubElement(world_volume, "materialref", ref="vacuum")
 	xml.SubElement(world_volume, "solidref", ref="infinite_void")
-	for i, detector in enumerate(detectors):
-		detector_specification = xml.SubElement(world_volume, "physvol", name=f"det_phys{i}")
-		xml.SubElement(detector_specification, "volumeref", ref=f"detector{i}_log")
+	for i, solid in enumerate(solids):
+		name = f"det_phys{i}" if solid.material == detector_material else f"body{i}"
+		volume_specification = xml.SubElement(world_volume, "physvol", name=name)
+		xml.SubElement(volume_specification, "volumeref", ref=f"solid{i}_log")
 		xml.SubElement(
-			detector_specification, "position", name=f"detector{i}_pos", unit="mm",
-			x=f"{detector.x_position}", y=f"{detector.y_position}", z=f"{detector.z_position}")
+			volume_specification, "position", name=f"solid{i}_pos", unit="mm",
+			x=f"{solid.x_position}", y=f"{solid.y_position}", z=f"{solid.z_position}")
 
 	# and then whatever this is
 	setup = xml.SubElement(input_deck, "setup", name="Default", version="1.0")
@@ -112,8 +121,9 @@ def simulate(material: str, detectors: list[Solid], beam: Beam) -> NDArray:
 
 
 class Solid:
-	def __init__(self, kind: str, x_position: float, y_position: float, z_position: float, **kwargs: float):
+	def __init__(self, kind: str, material="detector", x_position=0., y_position=0., z_position=0., **kwargs: float):
 		self.kind = kind
+		self.material = material
 		self.x_position = x_position
 		self.y_position = y_position
 		self.z_position = z_position
@@ -121,14 +131,16 @@ class Solid:
 
 
 class Beam:
-	def __init__(self, particle: str, energy: float):
+	def __init__(self, particle: str, energy: float, width=0.0):
 		"""
 		a type of radiation
 		:param particle: the name of the particle
 		:param energy: the energy of each particle (MeV)
+		:param width: the diameter of the beam (mm)
 		"""
 		self.particle_name = particle
 		self.rest_mass = PARTICLE_DATA[particle]["rest_mass"]  # MeV/c²
 		self.charge = PARTICLE_DATA[particle]["charge"]  # e
 		self.number = PARTICLE_DATA[particle]["number"]
 		self.energy = energy
+		self.width = width

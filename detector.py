@@ -1,3 +1,5 @@
+""" a formalism for rectangular detectors with simple energy thresholding """
+
 from __future__ import annotations
 
 import os
@@ -48,10 +50,9 @@ def response(detector: Detector, beam: Beam) -> NDArray:
 		[Solid(
 			"box",
 			x=detector.width, y=100, z=detector.depth,
-			x_position=0, y_position=0, z_position=0,
 		)],
 		beam)
-	return histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(tracks["EventID"].max() + 2))[0]
+	return histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, tracks["EventID"].max() + 1))[0]
 
 
 class Detector:
