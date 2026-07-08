@@ -1,5 +1,5 @@
 MATERIAL_DATA = {
-	"LaBr₃": {
+	"LaBr3": {
 		"density": 5.06,
 		"elements": {
 			"La": 1,

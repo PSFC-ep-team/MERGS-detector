@@ -44,24 +44,24 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray
 	xml.SubElement(material_info, "D", value="1e-25", unit="g/cm3")
 	xml.SubElement(material_info, "composite", ref="N", n="1.0")
 
-	# I don't know what any of these settings are
+	# some miscillaneus settings
 	definitions = xml.SubElement(input_deck, "define")
-	# output settings?
+	# output settings
 	xml.SubElement(definitions, "constant", name="TextOutputOn", value="1")
 	xml.SubElement(definitions, "constant", name="BriefOutputOn", value="0")
-	xml.SubElement(definitions, "constant", name="VRMLvisualizationOn", value="0")
+	xml.SubElement(definitions, "constant", name="VRMLvisualizationOn", value="1")
 	xml.SubElement(definitions, "constant", name="EventsToAccumulate", value="100")
-	# physics cuts?
+	# particle selections
 	xml.SubElement(definitions, "constant", name="LightProducingParticle", value="0")
 	xml.SubElement(definitions, "constant", name="LowEnergyCutoff", value="0")
 	xml.SubElement(definitions, "constant", name="KeepOnlyMainParticle", value="0")
 	xml.SubElement(definitions, "quantity",
 	               name="ProductionLowLimit", type="threshold", value="1", unit="keV")
-	# output filters?
+	# output filters
 	xml.SubElement(definitions, "constant", name="SaveSurfaceHitTrack", value="0")
 	xml.SubElement(definitions, "constant", name="SaveTrackInfo", value="1")
 	xml.SubElement(definitions, "constant", name="SaveEdepositedTotalEntry", value="0")
-	# bean definition?
+	# bean definition
 	xml.SubElement(definitions, "constant", name="RandomGenSeed", value="0")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamOffsetX", type="coordinate", value="0", unit="mm")
@@ -100,6 +100,10 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray
 		xml.SubElement(
 			volume_specification, "position", name=f"solid{i}_pos", unit="mm",
 			x=f"{solid.x_position}", y=f"{solid.y_position}", z=f"{solid.z_position}")
+		if solid.x_rotation != 0 or solid.y_rotation != 0 or solid.z_rotation != 0:
+			xml.SubElement(
+				volume_specification, "rotation", name=f"solid{i}_rot", unit="deg",
+				x=f"{solid.x_rotation}", y=f"{solid.y_rotation}", z=f"{solid.z_rotation}")
 
 	# and then whatever this is
 	setup = xml.SubElement(input_deck, "setup", name="Default", version="1.0")
@@ -111,8 +115,16 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray
 	xml.indent(tree)
 	tree.write("run/input.gdml", xml_declaration=True, encoding="UTF-8")
 
+	# clear previus output
+	try:
+		os.remove("run/output.dat")
+	except FileNotFoundError:
+		pass
+
+	# call the executable
 	subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run")
 
+	# read the output
 	try:
 		output_data = genfromtxt("run/output.dat", names=True, comments=None)
 	except FileNotFoundError:
@@ -121,12 +133,18 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray
 
 
 class Solid:
-	def __init__(self, kind: str, material="detector", x_position=0., y_position=0., z_position=0., **kwargs: float):
+	def __init__(
+			self, kind: str, material="detector",
+			x_position=0., y_position=0., z_position=0.,
+			x_rotation=0., y_rotation=0., z_rotation=0., **kwargs: float):
 		self.kind = kind
 		self.material = material
 		self.x_position = x_position
 		self.y_position = y_position
 		self.z_position = z_position
+		self.x_rotation = x_rotation
+		self.y_rotation = y_rotation
+		self.z_rotation = z_rotation
 		self.kwargs = kwargs
 
 
