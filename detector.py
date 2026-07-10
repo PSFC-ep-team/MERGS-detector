@@ -33,16 +33,16 @@ def plot_sensitivity_curves(detector: Detector) -> None:
 	plt.show()
 
 
-def sensitivity(detector: Detector, beam: Beam) -> float:
+def sensitivity(detector: Detector, beam: Beam, num_particles=10000) -> float:
 	""" calculate the fraction of these incident particles that are detected by this detector """
-	energy_deposited = response(detector, beam)
+	energy_deposited = response(detector, beam, num_particles)
 	return count_nonzero(
 		(energy_deposited >= detector.lower_threshold) &
 		(energy_deposited <= detector.upper_threshold)
 	)/energy_deposited.size
 
 
-def response(detector: Detector, beam: Beam) -> NDArray:
+def response(detector: Detector, beam: Beam, num_particles=10000) -> NDArray:
 	""" run a simulation for this detector and extract the total energy deposition of each particle """
 	tracks = simulate(
 		detector.material_name,
@@ -50,7 +50,8 @@ def response(detector: Detector, beam: Beam) -> NDArray:
 			"box",
 			x=detector.width, y=100, z=detector.depth,
 		)],
-		beam)
+		beam,
+		num_particles)
 	return histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, tracks["EventID"].max() + 1))[0]
 
 

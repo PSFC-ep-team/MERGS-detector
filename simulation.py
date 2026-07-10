@@ -12,23 +12,39 @@ from numpy.typing import NDArray
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 
-def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles=10000) -> NDArray:
+def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles: int, debug_mode=False) -> NDArray:
 	""" run a Geant4 simulation of a beam of these particles hitting a detector """
-	# first of all, check the ambient flag.  if it's set, we actually do multiple simulations
+	# first of all, check the ambient flag.  if it's set, we actually do multiple simulations.
 	if beam.ambient:
 		beam = Beam(beam.particle_name, beam.energy, beam.width, ambient=False)
 		num_orientations = 36
 		θ = degrees(arccos(linspace(-1, 1, 2*num_orientations + 1)[1:-1:2]))
 		φ = (180*(3 - sqrt(5))*arange(num_orientations))%360
 		num_particles = round(num_particles/num_orientations)
+		num_particles_done = 0
 		results = []
 		for i in range(num_orientations):
 			rotated_solids = []
 			for solid in solids:
 				rotated_solids.append(solid.rotated(z_rotation=φ[i], y_rotation=θ[i]))
 			result = simulate(detector_material, rotated_solids, beam, num_particles=num_particles)
-			result["EventID"] += i*num_particles
+			result["EventID"] += num_particles_done  # increment EventID so that they histogram correctly
+			num_particles_done = result["EventID"].max() + 1
 			results.append(result)
+		return concatenate(results)
+
+	# then, check if there are multiple energies.  if so, we need another layer of multiple simulations.
+	if type(beam.energy) is Spectrum:
+		results = []
+		num_particles_done = 0
+		for i in range(len(beam.energy.energies)):
+			monoenergetic_beam = Beam(beam.particle_name, beam.energy.energies[i], beam.width)
+			num_monoenergetic_particles = round(num_particles*beam.energy.probabilities[i]/sum(beam.energy.probabilities))
+			if num_monoenergetic_particles > 0:
+				result = simulate(detector_material, solids, monoenergetic_beam, num_particles=num_monoenergetic_particles)
+				result["EventID"] += num_particles_done  # increment EventID so that they histogram correctly
+				num_particles_done = result["EventID"].max() + 1
+				results.append(result)
 		return concatenate(results)
 
 	# start by instantiating the input deck
@@ -67,8 +83,8 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	# output settings
 	xml.SubElement(definitions, "constant", name="TextOutputOn", value="1")
 	xml.SubElement(definitions, "constant", name="BriefOutputOn", value="0")
-	xml.SubElement(definitions, "constant", name="VRMLvisualizationOn", value="1")
-	xml.SubElement(definitions, "constant", name="EventsToAccumulate", value="100")
+	xml.SubElement(definitions, "constant", name="VRMLvisualizationOn", value="1" if debug_mode else "0")
+	xml.SubElement(definitions, "constant", name="EventsToAccumulate", value="100" if debug_mode else "0")
 	# particle selections
 	xml.SubElement(definitions, "constant", name="LightProducingParticle", value="0")
 	xml.SubElement(definitions, "constant", name="LowEnergyCutoff", value="0")
@@ -188,7 +204,7 @@ class Solid:
 
 
 class Beam:
-	def __init__(self, particle: str, energy: float, width=0.0, ambient=False):
+	def __init__(self, particle: str, energy: float | Spectrum, width=0.0, ambient=False):
 		"""
 		a type of radiation
 		:param particle: the name of the particle
@@ -203,3 +219,9 @@ class Beam:
 		self.energy = energy
 		self.width = width
 		self.ambient = ambient
+
+
+class Spectrum:
+	def __init__(self, energies: NDArray, probabilities: NDArray):
+		self.energies = energies
+		self.probabilities = probabilities
