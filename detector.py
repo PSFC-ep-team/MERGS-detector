@@ -20,7 +20,7 @@ def plot_sensitivity_curves(detector: Detector) -> None:
 		sensitivities = empty_like(energies)
 		for i, energy in enumerate(energies):
 			print(f"{energy:.2g} MeV {particle}s")
-			sensitivities[i] = sensitivity(detector, Beam(particle, energy))
+			sensitivities[i] = sensitivity(detector, Beam(particle, energy, ambient=(particle != "electron")))
 		plt.plot(energies, sensitivities, color=color, label=particle)
 	os.makedirs("figures", exist_ok=True)
 	plt.legend()
@@ -44,7 +44,6 @@ def sensitivity(detector: Detector, beam: Beam) -> float:
 
 def response(detector: Detector, beam: Beam) -> NDArray:
 	""" run a simulation for this detector and extract the total energy deposition of each particle """
-	# TODO: account for spacial and angular extent of the beam
 	tracks = simulate(
 		detector.material_name,
 		[Solid(
@@ -75,4 +74,4 @@ class Detector:
 
 
 if __name__ == "__main__":
-	plot_sensitivity_curves(Detector("LaBr₃", 10, 30, lower_threshold=8.25))
+	plot_sensitivity_curves(Detector("LaBr3", 10, 30, lower_threshold=8.25))

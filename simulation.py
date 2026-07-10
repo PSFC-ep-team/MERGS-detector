@@ -6,14 +6,32 @@ import os
 import subprocess
 import xml.etree.ElementTree as xml
 
-from numpy import genfromtxt
+from numpy import genfromtxt, degrees, arccos, linspace, sqrt, arange, concatenate, sin, cos, array, radians
 from numpy.typing import NDArray
 
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 
-def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray:
+def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles=10000) -> NDArray:
 	""" run a Geant4 simulation of a beam of these particles hitting a detector """
+	# first of all, check the ambient flag.  if it's set, we actually do multiple simulations
+	if beam.ambient:
+		beam = Beam(beam.particle_name, beam.energy, beam.width, ambient=False)
+		num_orientations = 36
+		θ = degrees(arccos(linspace(-1, 1, 2*num_orientations + 1)[1:-1:2]))
+		φ = (180*(3 - sqrt(5))*arange(num_orientations))%360
+		num_particles = round(num_particles/num_orientations)
+		results = []
+		for i in range(num_orientations):
+			rotated_solids = []
+			for solid in solids:
+				rotated_solids.append(solid.rotated(z_rotation=φ[i], y_rotation=θ[i]))
+			result = simulate(detector_material, rotated_solids, beam, num_particles=num_particles)
+			result["EventID"] += i*num_particles
+			results.append(result)
+		return concatenate(results)
+
+	# start by instantiating the input deck
 	input_deck = xml.Element("gdml", {
 		"xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
 		"xsi:noNamespaceSchemaLocation": os.path.expanduser("~/grasshopper/schema/gdml.xsd"),
@@ -25,10 +43,10 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray
 			solid.material = detector_material
 
 	# specify the materials
+	materials = xml.SubElement(input_deck, "materials")
 	for material in {solid.material for solid in solids}:
 		density = MATERIAL_DATA[material]["density"]
 		elements = MATERIAL_DATA[material]["elements"]
-		materials = xml.SubElement(input_deck, "materials")
 		for element in elements.keys() | {"N"}:
 			element_info = xml.SubElement(
 				materials, "element", Z=f"{ELEMENT_DATA[element][0]}", name=element)
@@ -44,7 +62,7 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray
 	xml.SubElement(material_info, "D", value="1e-25", unit="g/cm3")
 	xml.SubElement(material_info, "composite", ref="N", n="1.0")
 
-	# some miscillaneus settings
+	# some miscellaneus settings
 	definitions = xml.SubElement(input_deck, "define")
 	# output settings
 	xml.SubElement(definitions, "constant", name="TextOutputOn", value="1")
@@ -73,7 +91,7 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray
 	               name="BeamSize", type="coordinate", value=f"{beam.width}", unit="mm")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamEnergy", type="energy", value=f"{beam.energy}", unit="MeV")
-	xml.SubElement(definitions, "constant", name="EventsToRun", value="10000")
+	xml.SubElement(definitions, "constant", name="EventsToRun", value=f"{num_particles}")
 	xml.SubElement(definitions, "constant", name="ParticleNumber", value=f"{beam.number}")
 
 	# specify the geometry
@@ -132,6 +150,13 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam) -> NDArray
 	return output_data
 
 
+def rotation_matrix(θ):
+	return array([
+		[cos(θ), sin(θ)],
+		[-sin(θ), cos(θ)],
+	])
+
+
 class Solid:
 	def __init__(
 			self, kind: str, material="detector",
@@ -148,13 +173,28 @@ class Solid:
 		self.kwargs = kwargs
 
 
+	def rotated(self, x_rotation=0., y_rotation=0., z_rotation=0.) -> Solid:
+		if self.x_rotation != 0 or self.y_rotation != 0 or self.z_rotation != 0:
+			raise NotImplementedError("sorry rotation math is hard")
+		x_position, y_position, z_position = self.x_position, self.y_position, self.z_position
+		x_position, y_position = rotation_matrix(radians(z_rotation))@[x_position, y_position]
+		z_position, x_position = rotation_matrix(radians(y_rotation))@[z_position, x_position]
+		y_position, z_position = rotation_matrix(radians(x_rotation))@[y_position, z_position]
+		return Solid(
+			self.kind, self.material,
+			x_position, y_position, z_position,
+			x_rotation, y_rotation, z_rotation,
+			**self.kwargs)
+
+
 class Beam:
-	def __init__(self, particle: str, energy: float, width=0.0):
+	def __init__(self, particle: str, energy: float, width=0.0, ambient=False):
 		"""
 		a type of radiation
 		:param particle: the name of the particle
 		:param energy: the energy of each particle (MeV)
 		:param width: the diameter of the beam (mm)
+		:param ambient: whether particles should come from all directions instead of just z-
 		"""
 		self.particle_name = particle
 		self.rest_mass = PARTICLE_DATA[particle]["rest_mass"]  # MeV/c²
@@ -162,3 +202,4 @@ class Beam:
 		self.number = PARTICLE_DATA[particle]["number"]
 		self.energy = energy
 		self.width = width
+		self.ambient = ambient

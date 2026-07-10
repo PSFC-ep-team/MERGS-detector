@@ -41,14 +41,15 @@ def plot_histogram(detector: Detector, beam: Beam) -> None:
 	plt.show()
 
 
-def plot_heatmap(detector: Detector, beam: Beam) -> None:
+def plot_heatmap(detector: Detector, beam: Beam, num_particles=10000) -> None:
 	"""
 	visualize the spacial distribution of energy deposition in this material
 	:param detector: the detector to depict
 	:param beam: the species and energy of the particles that are depositing energy
+	:param num_particles: the number of particles to simulate
 	"""
 	x_edges = linspace(-detector.width/2, detector.width/2, round((10*sqrt(detector.width/detector.depth) + 1)/2)*2)  # make sure there's an odd number of x bins
-	z_edges = linspace(0, detector.depth, round(10*sqrt(detector.depth/detector.width) + 1))
+	z_edges = linspace(-detector.depth/2, detector.depth/2, round(10*sqrt(detector.depth/detector.width) + 1))
 	x_positions = (x_edges[0:-1] + x_edges[1:])/2
 	z_positions = (z_edges[0:-1] + z_edges[1:])/2
 	x_sizes = diff(x_edges)
@@ -66,7 +67,7 @@ def plot_heatmap(detector: Detector, beam: Beam) -> None:
 				z=z_sizes[j],
 			))
 
-	tracks = simulate(detector.material_name, grid, beam)
+	tracks = simulate(detector.material_name, grid, beam, num_particles=num_particles)
 	deposition = reshape(
 		histogram(tracks["detector"], weights=tracks["E_depositedMeV"], bins=arange(len(grid) + 1))[0],
 		shape=(x_positions.size, z_positions.size))
