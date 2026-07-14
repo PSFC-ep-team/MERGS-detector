@@ -5,7 +5,7 @@ import os
 from matplotlib import pyplot as plt
 from numpy import linspace, sqrt, diff, histogram, arange, reshape, partition, count_nonzero
 
-from detector import Detector, response
+from detector import Detector, calculate_response
 from simulation import Beam, simulate, Solid
 
 
@@ -20,8 +20,8 @@ def plot_histogram(detector: Detector, beam: Beam) -> None:
 	:param detector: the detector the particles are hitting
 	:param beam: the species and energy of the particles that are depositing energy
 	"""
-	energy_deposition = response(detector, beam)
-	bins = linspace(0, beam.energy*1.05, 51)
+	energy_deposition = calculate_response(detector, beam)
+	bins = linspace(0, 1.05*beam.energy, 51)
 	counts = histogram(energy_deposition, bins=bins, density=True)[0]
 
 	full_deposition = count_nonzero(energy_deposition >= 0.99*beam.energy)/energy_deposition.size

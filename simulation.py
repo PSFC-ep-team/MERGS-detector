@@ -219,6 +219,10 @@ class Beam:
 
 
 class Spectrum:
-	def __init__(self, energies: NDArray, probabilities: NDArray):
+	def __init__(self, name: str, energies: NDArray, probabilities: NDArray):
+		self.name = name
 		self.energies = energies
 		self.probabilities = probabilities
+
+	def __str__(self):
+		return self.name

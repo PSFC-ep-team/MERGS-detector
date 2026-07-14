@@ -20,7 +20,7 @@ def plot_sensitivity_curves(detector: Detector) -> None:
 		sensitivities = empty_like(energies)
 		for i, energy in enumerate(energies):
 			print(f"{energy:.2g} MeV {particle}s")
-			sensitivities[i] = sensitivity(detector, Beam(particle, energy, ambient=(particle != "electron")))
+			sensitivities[i] = calculate_sensitivity(detector, Beam(particle, energy, ambient=(particle != "electron")))
 		plt.plot(energies, sensitivities, color=color, label=particle)
 	os.makedirs("figures", exist_ok=True)
 	plt.legend()
@@ -33,16 +33,47 @@ def plot_sensitivity_curves(detector: Detector) -> None:
 	plt.show()
 
 
-def sensitivity(detector: Detector, beam: Beam, num_particles=10000) -> float:
+def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, ignore_misses=False, use_cache=False) -> float:
 	""" calculate the fraction of these incident particles that are detected by this detector """
-	energy_deposited = response(detector, beam, num_particles)
-	return count_nonzero(
+	cache_key = (f"{detector.material_name}, {detector.width}, {detector.depth}, "
+	             f"{detector.lower_threshold}, {detector.upper_threshold}, "
+	             f"{beam.particle_name}, {beam.energy}, {beam.width}, {'ambient' if beam.ambient else 'collimated'}, "
+	             f"{'ignore misses' if ignore_misses else 'count misses'}")
+	if use_cache:
+		# first, try to load it from the cache
+		try:
+			with open("cache.txt", mode="r") as file:
+				for line in file.readlines():
+					input_string, output_string = line.split(" -> ")
+					if input_string == cache_key:
+						return float(output_string)
+		except FileNotFoundError:
+			pass
+
+	# do the simulation
+	energy_deposited = calculate_response(detector, beam, num_particles)
+
+	# calculate the sensitivity
+	num_detected = count_nonzero(
+		(energy_deposited > 0) &
 		(energy_deposited >= detector.lower_threshold) &
 		(energy_deposited <= detector.upper_threshold)
-	)/energy_deposited.size
+	)
+	if ignore_misses:
+		num_total = count_nonzero(energy_deposited > 0)
+	else:
+		num_total = energy_deposited.size
+	sensitivity = num_detected/num_total
+
+	if use_cache:
+		with open("cache.txt", mode="a") as file:
+			file.write(f"{cache_key} -> {sensitivity}\n")
+
+	return sensitivity
 
 
-def response(detector: Detector, beam: Beam, num_particles=10000) -> NDArray:
+
+def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> NDArray:
 	""" run a simulation for this detector and extract the total energy deposition of each particle """
 	tracks = simulate(
 		detector.material_name,
@@ -52,7 +83,7 @@ def response(detector: Detector, beam: Beam, num_particles=10000) -> NDArray:
 		)],
 		beam,
 		num_particles)
-	return histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, tracks["EventID"].max() + 1))[0]
+	return histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, num_particles))[0]
 
 
 class Detector:
