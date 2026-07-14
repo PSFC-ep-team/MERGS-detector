@@ -6,7 +6,7 @@ import os
 import subprocess
 import xml.etree.ElementTree as xml
 
-from numpy import genfromtxt, degrees, arccos, linspace, sqrt, arange, concatenate, sin, cos, array, radians
+from numpy import genfromtxt, savetxt, degrees, arccos, linspace, sqrt, arange, concatenate, sin, cos, array, radians, stack
 from numpy.typing import NDArray
 
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
@@ -17,7 +17,7 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	# first of all, check the ambient flag.  if it's set, we actually do multiple simulations.
 	if beam.ambient:
 		beam = Beam(beam.particle_name, beam.energy, beam.width, ambient=False)
-		num_orientations = 36
+		num_orientations = 20
 		θ = degrees(arccos(linspace(-1, 1, 2*num_orientations + 1)[1:-1:2]))
 		φ = (180*(3 - sqrt(5))*arange(num_orientations))%360
 		num_particles = round(num_particles/num_orientations)
@@ -29,23 +29,20 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 				rotated_solids.append(solid.rotated(z_rotation=φ[i], y_rotation=θ[i]))
 			result = simulate(detector_material, rotated_solids, beam, num_particles=num_particles)
 			result["EventID"] += num_particles_done  # increment EventID so that they histogram correctly
-			num_particles_done = result["EventID"].max() + 1
+			num_particles_done = num_particles
 			results.append(result)
 		return concatenate(results)
 
-	# then, check if there are multiple energies.  if so, we need another layer of multiple simulations.
+	# then, check if there are multiple energies.  if so, we need to use `input_spectrum.txt`.
 	if type(beam.energy) is Spectrum:
-		results = []
-		num_particles_done = 0
-		for i in range(len(beam.energy.energies)):
-			monoenergetic_beam = Beam(beam.particle_name, beam.energy.energies[i], beam.width)
-			num_monoenergetic_particles = round(num_particles*beam.energy.probabilities[i]/sum(beam.energy.probabilities))
-			if num_monoenergetic_particles > 0:
-				result = simulate(detector_material, solids, monoenergetic_beam, num_particles=num_monoenergetic_particles)
-				result["EventID"] += num_particles_done  # increment EventID so that they histogram correctly
-				num_particles_done = result["EventID"].max() + 1
-				results.append(result)
-		return concatenate(results)
+		savetxt("run/input_spectrum.txt", stack([beam.energy.energies, beam.energy.probabilities], axis=1))
+		energy_code = "-2"
+	else:
+		try:
+			os.remove("run/input_spectrum.txt")
+		except FileNotFoundError:
+			pass
+		energy_code = f"{beam.energy}"
 
 	# start by instantiating the input deck
 	input_deck = xml.Element("gdml", {
@@ -106,7 +103,7 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	xml.SubElement(definitions, "quantity",
 	               name="BeamSize", type="coordinate", value=f"{beam.width}", unit="mm")
 	xml.SubElement(definitions, "quantity",
-	               name="BeamEnergy", type="energy", value=f"{beam.energy}", unit="MeV")
+	               name="BeamEnergy", type="energy", value=energy_code, unit="MeV")
 	xml.SubElement(definitions, "constant", name="EventsToRun", value=f"{num_particles}")
 	xml.SubElement(definitions, "constant", name="ParticleNumber", value=f"{beam.number}")
 
