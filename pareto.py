@@ -1,4 +1,7 @@
-from numpy import pi, inf, array, linspace
+import os
+
+import matplotlib.pyplot as plt
+from numpy import pi, inf, array, linspace, savetxt
 from scipy import optimize
 
 from detector import calculate_sensitivity, Detector
@@ -7,6 +10,23 @@ from simulation import Beam, Spectrum
 
 background_energy = linspace(0.5, 14, 21)
 background_spectrum = Spectrum("E⁻²", background_energy, background_energy**-2)
+
+
+def find_pareto_front(material: str) -> list[tuple[float, float, float, float, float]]:
+	"""
+	find the pareto front of designs with high sensitivity to signal and low sensitivity to background
+	:param material: the material out of which the detector is made
+	:return: a bunch of designs specified by their width (mm), depth (mm), lower threshold (MeV), upper threshold (MeV),
+	         background sensitivity (mm²), and signal sensitivity
+	"""
+	signal_sensitivities = 1 - linspace(1, 0, 11)[1:-1]**2
+	results = []
+	for target_signal_sensitivity in signal_sensitivities:
+		width, depth, lower_threshold, upper_threshold, background_sensitivity = optimize_detector(material, target_signal_sensitivity)
+		results.append((width, depth, lower_threshold, upper_threshold, background_sensitivity, target_signal_sensitivity))
+	os.makedirs("result", exist_ok=True)
+	savetxt(f"results/pareto_{material}.txt", results)
+	return results
 
 
 def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, float, float, float, float]:
@@ -24,7 +44,7 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 				array([[0, 0, -1, 1]]),  # (lower threshold must < upper threshold)
 				lb=0, keep_feasible=True),
 		],
-		x0=[20., 80., 8.0, 16.8],
+		x0=[15., 40., 8.0, 16.8],
 		bounds=[
 			(1., 50.),
 			(0.2, 100.),
@@ -63,7 +83,7 @@ def calculate_background_sensitivity(
 ) -> float:
 	"""
 	the background sensitivity of this detector assuming ambient neutrons and photons with a 1/E² spectrum,
-	in counts per particle/cm²
+	in counts per particle/mm²
 	"""
 	detector = Detector(
 		material=material, width=width, depth=depth,
@@ -82,4 +102,16 @@ def calculate_background_sensitivity(
 
 
 if __name__ == "__main__":
-	optimize_detector("EJ-276", 0.5)
+	front_EJ276 = array(find_pareto_front("EJ-276"))
+	front_LaBr3 = array(find_pareto_front("LaBr3"))
+
+	plt.figure()
+	plt.plot(front_EJ276[:, 4], front_EJ276[:, 5], label="EJ-276")
+	plt.plot(front_LaBr3[:, 4], front_LaBr3[:, 5], label="LaBr₃")
+	plt.grid()
+	plt.xlabel("Background sensitivity")
+	plt.ylabel("Signal sensitivity")
+	plt.legend()
+	plt.tight_layout()
+	plt.savefig("figures/pareto.pdf")
+	plt.show()

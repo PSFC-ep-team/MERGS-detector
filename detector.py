@@ -42,7 +42,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 	if use_cache:
 		# first, try to load it from the cache
 		try:
-			with open("cache.txt", mode="r") as file:
+			with open("results/cache.txt", mode="r") as file:
 				for line in file.readlines():
 					input_string, output_string = line.split(" -> ")
 					if input_string == cache_key:
@@ -66,7 +66,8 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 	sensitivity = num_detected/num_total
 
 	if use_cache:
-		with open("cache.txt", mode="a") as file:
+		os.makedirs("result", exist_ok=True)
+		with open("results/cache.txt", mode="a") as file:
 			file.write(f"{cache_key} -> {sensitivity}\n")
 
 	return sensitivity
