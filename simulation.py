@@ -14,26 +14,28 @@ from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles: int, debug_mode=False) -> NDArray:
 	""" run a Geant4 simulation of a beam of these particles hitting a detector """
-	# first of all, check the ambient flag.  if it's set, we actually do multiple simulations.
-	if beam.ambient:
-		beam = Beam(beam.particle_name, beam.energy, beam.width, ambient=False)
-		num_orientations = 20
-		θ = degrees(arccos(linspace(-1, 1, 2*num_orientations + 1)[1:-1:2]))
-		φ = (180*(3 - sqrt(5))*arange(num_orientations))%360
-		num_particles = round(num_particles/num_orientations)
-		num_particles_done = 0
-		results = []
-		for i in range(num_orientations):
-			rotated_solids = []
-			for solid in solids:
-				rotated_solids.append(solid.rotated(z_rotation=φ[i], y_rotation=θ[i]))
-			result = simulate(detector_material, rotated_solids, beam, num_particles=num_particles)
-			result["EventID"] += num_particles_done  # increment EventID so that they histogram correctly
-			num_particles_done = num_particles
-			results.append(result)
-		return concatenate(results)
+	# start by instantiating the input deck
+	input_deck = xml.Element("gdml", {
+		"xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+		"xsi:noNamespaceSchemaLocation": os.path.expanduser("~/grasshopper/schema/gdml.xsd"),
+	})
+	materials = xml.SubElement(input_deck, "materials")
+	definitions = xml.SubElement(input_deck, "define")
+	solid_group = xml.SubElement(input_deck, "solids")
+	structure = xml.SubElement(input_deck, "structure")
+	setup = xml.SubElement(input_deck, "setup", name="Default", version="1.0")
 
-	# then, check if there are multiple energies.  if so, we need to use `input_spectrum.txt`.
+	# check the ambient flag.  if so, we need to use an "omnidirectional" beam.
+	if beam.ambient:
+		xml.SubElement(definitions, "quantity",
+		               name="WorldRadius", type="coordinate", value=f"{beam.distance}", unit="mm")
+		source_position = "0"
+		source_code = "-3"
+	else:
+		source_position = f"{-beam.distance}"
+		source_code = f"{beam.diameter/2}"
+
+	# check if there are multiple energies.  if so, we need to use `input_spectrum.txt`.
 	if type(beam.energy) is Spectrum:
 		savetxt("run/input_spectrum.txt", stack([beam.energy.energies, beam.energy.probabilities], axis=1))
 		energy_code = "-2"
@@ -44,19 +46,12 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 			pass
 		energy_code = f"{beam.energy}"
 
-	# start by instantiating the input deck
-	input_deck = xml.Element("gdml", {
-		"xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-		"xsi:noNamespaceSchemaLocation": os.path.expanduser("~/grasshopper/schema/gdml.xsd"),
-	})
-
 	# first apply detector_material to every detector solid
 	for solid in solids:
 		if solid.material == "detector":
 			solid.material = detector_material
 
 	# specify the materials
-	materials = xml.SubElement(input_deck, "materials")
 	for material in {solid.material for solid in solids}:
 		density = MATERIAL_DATA[material]["density"]
 		elements = MATERIAL_DATA[material]["elements"]
@@ -75,40 +70,37 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	xml.SubElement(material_info, "D", value="1e-25", unit="g/cm3")
 	xml.SubElement(material_info, "composite", ref="N", n="1.0")
 
-	# some miscellaneus settings
-	definitions = xml.SubElement(input_deck, "define")
-	# output settings
+	# specify output settings
 	xml.SubElement(definitions, "constant", name="TextOutputOn", value="1")
 	xml.SubElement(definitions, "constant", name="BriefOutputOn", value="0")
 	xml.SubElement(definitions, "constant", name="VRMLvisualizationOn", value="1" if debug_mode else "0")
 	xml.SubElement(definitions, "constant", name="EventsToAccumulate", value="100" if debug_mode else "0")
-	# particle selections
+	# specify particle selections
 	xml.SubElement(definitions, "constant", name="LightProducingParticle", value="0")
 	xml.SubElement(definitions, "constant", name="LowEnergyCutoff", value="0")
 	xml.SubElement(definitions, "constant", name="KeepOnlyMainParticle", value="0")
 	xml.SubElement(definitions, "quantity",
 	               name="ProductionLowLimit", type="threshold", value="1", unit="keV")
-	# output filters
+	# specify output filters
 	xml.SubElement(definitions, "constant", name="SaveSurfaceHitTrack", value="0")
 	xml.SubElement(definitions, "constant", name="SaveTrackInfo", value="1")
 	xml.SubElement(definitions, "constant", name="SaveEdepositedTotalEntry", value="0")
-	# bean definition
+	# specify the bean
 	xml.SubElement(definitions, "constant", name="RandomGenSeed", value="0")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamOffsetX", type="coordinate", value="0", unit="mm")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamOffsetY", type="coordinate", value="0", unit="mm")
 	xml.SubElement(definitions, "quantity",
-	               name="BeamOffsetZ", type="coordinate", value="-100", unit="mm")
+	               name="BeamOffsetZ", type="coordinate", value=source_position, unit="mm")
 	xml.SubElement(definitions, "quantity",
-	               name="BeamSize", type="coordinate", value=f"{beam.width}", unit="mm")
+	               name="BeamSize", type="coordinate", value=source_code, unit="mm")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamEnergy", type="energy", value=energy_code, unit="MeV")
 	xml.SubElement(definitions, "constant", name="EventsToRun", value=f"{num_particles}")
 	xml.SubElement(definitions, "constant", name="ParticleNumber", value=f"{beam.number}")
 
 	# specify the geometry
-	solid_group = xml.SubElement(input_deck, "solids")
 	for i, solid in enumerate(solids):
 		xml.SubElement(solid_group, solid.kind, name=f"solid{i}",
 		               lunit="mm", **{key: f"{value}" for key, value in solid.kwargs.items()})
@@ -116,7 +108,6 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	               x="300", y="300", z="300", lunit="mm")
 
 	# fill in the remaining information
-	structure = xml.SubElement(input_deck, "structure")
 	for i, solid in enumerate(solids):
 		volume = xml.SubElement(structure, "volume", name=f"solid{i}_log")
 		xml.SubElement(volume, "materialref", ref=solid.material)
@@ -137,7 +128,6 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 				x=f"{solid.x_rotation}", y=f"{solid.y_rotation}", z=f"{solid.z_rotation}")
 
 	# and then whatever this is
-	setup = xml.SubElement(input_deck, "setup", name="Default", version="1.0")
 	xml.SubElement(setup, "world", ref="world_log")
 
 	# write to disc
@@ -201,12 +191,13 @@ class Solid:
 
 
 class Beam:
-	def __init__(self, particle: str, energy: float | Spectrum, width=0.0, ambient=False):
+	def __init__(self, particle: str, energy: float | Spectrum, diameter=0.0, distance=100.0, ambient=False):
 		"""
 		a type of radiation
 		:param particle: the name of the particle
 		:param energy: the energy of each particle (MeV)
-		:param width: the diameter of the beam (mm)
+		:param diameter: the diameter of the beam (mm)
+		:param distance: the standoff distance of the source from the origin
 		:param ambient: whether particles should come from all directions instead of just z-
 		"""
 		self.particle_name = particle
@@ -214,8 +205,11 @@ class Beam:
 		self.charge = PARTICLE_DATA[particle]["charge"]  # e
 		self.number = PARTICLE_DATA[particle]["number"]
 		self.energy = energy
-		self.width = width
+		self.diameter = diameter
+		self.distance = distance
 		self.ambient = ambient
+		if ambient and diameter != 0:
+			raise ValueError("you can't pass a diameter when the source is ambient because that doesn't make any sense")
 
 
 class Spectrum:

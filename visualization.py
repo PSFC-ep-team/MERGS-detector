@@ -9,11 +9,6 @@ from detector import Detector, calculate_response
 from simulation import Beam, simulate, Solid
 
 
-def moliere_radius(material: str) -> float:
-	""" calculate the Moliere radius of a material """
-	pass
-
-
 def plot_histogram(detector: Detector, beam: Beam) -> None:
 	"""
 	visualize the energy distribution of energy deposition in this material
@@ -74,12 +69,13 @@ def plot_heatmap(detector: Detector, beam: Beam, num_particles=10000) -> None:
 
 	os.makedirs("figures", exist_ok=True)
 	plt.figure()
-	plt.imshow(deposition.T, extent=(-detector.width/2, detector.width/2, 0, detector.depth), cmap="inferno")
+	plt.imshow(
+		deposition.T, extent=(-detector.width/2, detector.width/2, 0, detector.depth),
+		cmap="inferno", vmin=0, vmax=deposition.max())
 	plt.savefig("figures/deposition_heatmap.pdf")
 	plt.show()
 
 
 if __name__ == "__main__":
-	print(moliere_radius("LYSO"))
 	# plot_histogram(Detector("EJ-276", 50, 80), Beam("electron", 16.7))
 	plot_heatmap(Detector("EJ-100", 6, 10), Beam("electron", 2.5))

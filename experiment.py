@@ -5,9 +5,9 @@ import os
 
 import matplotlib
 import matplotlib.pyplot as plt
-from numpy import pi, partition, histogram, linspace, arange, nonzero
+from numpy import pi, partition, histogram, linspace, arange
 
-from simulation import simulate, Beam, Solid, Spectrum
+from simulation import simulate, Beam, Solid
 
 matplotlib.rcParams['axes.prop_cycle'] = matplotlib.cycler(color=["#e6b648", "#2abd41", "#04d6e7", "#000000"])
 
@@ -23,7 +23,7 @@ tracks = simulate(
 		Solid("box", x=10, y=100, z=8, z_position=4.0),
 		Solid("box", x=8, y=100, z=5, z_position=-2.5),
 	],
-	Beam("electron", 2.5, width=0.1),
+	Beam("electron", 2.5, diameter=0.1),
 	num_particles=10000, debug_mode=True,
 )
 response = histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, tracks["EventID"].max() + 1))[0]
@@ -45,7 +45,7 @@ tracks = simulate(
 		Solid("box", x=5, y=100, z=8, x_position=0),
 		Solid("box", x=5, y=100, z=8, x_position=5),
 	],
-	Beam("electron", 2.5, width=0.1),
+	Beam("electron", 2.5, diameter=0.1),
 	num_particles=10000, debug_mode=True,
 )
 plt.figure()
@@ -67,7 +67,7 @@ tracks = simulate(
 		Solid("box", x=8, y=100, z=5, z_position=0),
 		Solid("box", x=8, y=100, z=5, z_position=5),
 	],
-	Beam("electron", 2.5, width=0.1),
+	Beam("electron", 2.5, diameter=0.1),
 	num_particles=10000, debug_mode=True,
 )
 plt.figure()
@@ -93,7 +93,7 @@ for i in range(15):
 tracks = simulate(
 	"EJ-100",
 	solids,
-	Beam("electron", 2.5, width=0.1),
+	Beam("electron", 2.5, diameter=0.1),
 	num_particles=10000, debug_mode=True,
 )
 plt.figure()
@@ -119,7 +119,7 @@ for i in range(15):
 tracks = simulate(
 	"EJ-100",
 	solids,
-	Beam("electron", 2.5, width=0.1),
+	Beam("electron", 2.5, diameter=0.1),
 	num_particles=10000, debug_mode=True,
 )
 plt.figure()
@@ -140,7 +140,7 @@ tracks = simulate(
 		Solid("tube", z=25.4, x_rotation=90., deltaphi=2*pi, rmax=12.7, material="LaBr3"),
 		Solid("tube", z=25.4, x_rotation=90., deltaphi=2*pi, rmin=12.7, rmax=14.2875, material="aluminum"),
 	],
-	Beam("electron", 2.5, width=0.1),
+	Beam("electron", 2.5, diameter=0.1),
 	num_particles=10000, debug_mode=True,
 )
 response = histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, tracks["EventID"].max() + 1))[0]
@@ -158,7 +158,7 @@ print(f"{counts.sum()/(tracks["EventID"].max() + 1):.1%} of the electrons reach 
 tracks = simulate(
 	"silicon",
 	[Solid("box", x=20, y=20, z=0.36)],
-	Beam("electron", 2.5, width=0.1),
+	Beam("electron", 2.5, diameter=0.1),
 	num_particles=10000, debug_mode=True,
 )
 response = histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, tracks["EventID"].max() + 1))[0]

@@ -37,7 +37,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 	""" calculate the fraction of these incident particles that are detected by this detector """
 	cache_key = (f"{detector.material_name}, {detector.width}, {detector.depth}, "
 	             f"{detector.lower_threshold}, {detector.upper_threshold}, "
-	             f"{beam.particle_name}, {beam.energy}, {beam.width}, {'ambient' if beam.ambient else 'collimated'}, "
+	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.distance}, {'ambient' if beam.ambient else 'collimated'}, "
 	             f"{'ignore misses' if ignore_misses else 'count misses'}")
 	if use_cache:
 		# first, try to load it from the cache
@@ -66,7 +66,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 	sensitivity = num_detected/num_total
 
 	if use_cache:
-		os.makedirs("result", exist_ok=True)
+		os.makedirs("results", exist_ok=True)
 		with open("results/cache.txt", mode="a") as file:
 			file.write(f"{cache_key} -> {sensitivity}\n")
 
@@ -88,12 +88,13 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> N
 
 
 class Detector:
-	def __init__(self, material: str, width: float, depth: float, lower_threshold=0., upper_threshold=inf):
+	def __init__(self, material: str, width: float, depth: float, length=100., lower_threshold=0., upper_threshold=inf):
 		"""
 		a single channel of an electron detector
 		:param material: the name of the detection material
 		:param width: the scale of the detector in the dispersive direction (mm)
 		:param depth: the scale of the detector in the beam direction (mm)
+		:param length: the scale of the detector in the nondispersive direction (mm)
 		:param lower_threshold: the minimum amount of energy in a pulse to be detected (MeV)
 		:param upper_threshold: the maximum amount of energy in a pulse to be detected (MeV)
 		"""
@@ -102,6 +103,7 @@ class Detector:
 		self.elements = MATERIAL_DATA[material]["elements"]
 		self.width = width
 		self.depth = depth
+		self.length = length
 		self.lower_threshold = lower_threshold
 		self.upper_threshold = upper_threshold
 

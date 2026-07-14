@@ -1,7 +1,7 @@
 import os
 
 import matplotlib.pyplot as plt
-from numpy import pi, inf, array, linspace, savetxt
+from numpy import pi, inf, array, linspace, savetxt, sqrt
 from scipy import optimize
 
 from detector import calculate_sensitivity, Detector
@@ -72,7 +72,7 @@ def calculate_signal_sensitivity(
 	detector = Detector(
 		material=material, width=width, depth=depth,
 		lower_threshold=lower_threshold, upper_threshold=upper_threshold)
-	beam = Beam("electron", 16.7, width=2*width)
+	beam = Beam("electron", 16.7, diameter=2*width)
 	signal_sensitivity = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True, ignore_misses=True)
 	return signal_sensitivity
 
@@ -88,16 +88,17 @@ def calculate_background_sensitivity(
 	detector = Detector(
 		material=material, width=width, depth=depth,
 		lower_threshold=lower_threshold, upper_threshold=upper_threshold)
-	neutron_beam = Beam("neutron", background_spectrum, width=100., ambient=True)
-	photon_beam = Beam("photon", background_spectrum, width=100., ambient=True)
+	world_radius = sqrt(width**2 + depth**2 + detector.length**2)/2
+	neutron_beam = Beam("neutron", background_spectrum, distance=world_radius, ambient=True)
+	photon_beam = Beam("photon", background_spectrum, distance=world_radius, ambient=True)
 	total_detection_rate = 0.
 	total_incidence_rate = 0.
 	if include_neutrons:
 		total_detection_rate += calculate_sensitivity(detector, neutron_beam, num_particles=1_000_000, use_cache=True)
-		total_incidence_rate += 1/(pi*100**2)
+		total_incidence_rate += 1/(4*pi*world_radius**2)
 	if include_photons:
 		total_detection_rate += calculate_sensitivity(detector, photon_beam, num_particles=1_000_000, use_cache=True)
-		total_incidence_rate += 1/(pi*100**2)
+		total_incidence_rate += 1/(4*pi*world_radius**2)
 	return total_detection_rate/total_incidence_rate
 
 
