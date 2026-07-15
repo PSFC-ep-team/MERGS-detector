@@ -94,10 +94,10 @@ def calculate_background_sensitivity(
 	total_detection_rate = 0.
 	total_incidence_rate = 0.
 	if include_neutrons:
-		total_detection_rate += calculate_sensitivity(detector, neutron_beam, num_particles=1_000_000, use_cache=True)
+		total_detection_rate += calculate_sensitivity(detector, neutron_beam, num_particles=10_000_000, use_cache=True)
 		total_incidence_rate += 1/(4*pi*world_radius**2)
 	if include_photons:
-		total_detection_rate += calculate_sensitivity(detector, photon_beam, num_particles=1_000_000, use_cache=True)
+		total_detection_rate += calculate_sensitivity(detector, photon_beam, num_particles=10_000_000, use_cache=True)
 		total_incidence_rate += 1/(4*pi*world_radius**2)
 	return total_detection_rate/total_incidence_rate
 

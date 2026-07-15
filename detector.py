@@ -9,7 +9,7 @@ from numpy import count_nonzero, inf, linspace, empty_like, histogram, arange
 from numpy.typing import NDArray
 
 from data import MATERIAL_DATA
-from simulation import Beam, simulate, Solid
+from simulation import Beam, simulate, Solid, Spectrum
 
 
 def plot_sensitivity_curves(detector: Detector) -> None:
@@ -50,8 +50,16 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 		except FileNotFoundError:
 			pass
 
+	# truncate the spectrum to save time, since nothing lower than the lower threshold matters
+	if type(beam.energy) is Spectrum:
+		truncated_spectrum, upper_fraction = beam.energy.truncate(detector.lower_threshold)
+		num_feasible_particles = round(num_particles*upper_fraction)
+		beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.distance, beam.ambient)
+	else:
+		num_feasible_particles = num_particles
+
 	# do the simulation
-	energy_deposited = calculate_response(detector, beam, num_particles)
+	energy_deposited = calculate_response(detector, beam, num_feasible_particles)
 
 	# calculate the sensitivity
 	num_detected = count_nonzero(
@@ -62,7 +70,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 	if ignore_misses:
 		num_total = count_nonzero(energy_deposited > 0)
 	else:
-		num_total = energy_deposited.size
+		num_total = num_particles
 	sensitivity = num_detected/num_total
 
 	if use_cache:

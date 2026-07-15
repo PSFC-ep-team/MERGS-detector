@@ -6,8 +6,9 @@ import os
 import subprocess
 import xml.etree.ElementTree as xml
 
-from numpy import genfromtxt, savetxt, degrees, arccos, linspace, sqrt, arange, concatenate, sin, cos, array, radians, stack
+from numpy import pi, genfromtxt, savetxt, concatenate, sin, cos, array, radians, stack, interp, isclose, hypot, count_nonzero
 from numpy.typing import NDArray
+from scipy import integrate
 
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
@@ -176,20 +177,6 @@ class Solid:
 		self.kwargs = kwargs
 
 
-	def rotated(self, x_rotation=0., y_rotation=0., z_rotation=0.) -> Solid:
-		if self.x_rotation != 0 or self.y_rotation != 0 or self.z_rotation != 0:
-			raise NotImplementedError("sorry rotation math is hard")
-		x_position, y_position, z_position = self.x_position, self.y_position, self.z_position
-		x_position, y_position = rotation_matrix(radians(z_rotation))@[x_position, y_position]
-		z_position, x_position = rotation_matrix(radians(y_rotation))@[z_position, x_position]
-		y_position, z_position = rotation_matrix(radians(x_rotation))@[y_position, z_position]
-		return Solid(
-			self.kind, self.material,
-			x_position, y_position, z_position,
-			x_rotation, y_rotation, z_rotation,
-			**self.kwargs)
-
-
 class Beam:
 	def __init__(self, particle: str, energy: float | Spectrum, diameter=0.0, distance=100.0, ambient=False):
 		"""
@@ -220,3 +207,43 @@ class Spectrum:
 
 	def __str__(self):
 		return self.name
+
+	def truncate(self, lower_bound: float) -> tuple[Spectrum, float]:
+		""" cut off the part of the spectrum below lower_bound, and return the factor by which this changes the normalization """
+		total_sum = integrate.trapezoid(self.probabilities, self.energies)
+		above_lower_bound = self.energies > lower_bound
+		p_bound = interp(lower_bound, self.energies, self.probabilities)
+		new_energies = concatenate([[lower_bound], self.energies[above_lower_bound]])
+		new_probabilities = concatenate([[p_bound], self.probabilities[above_lower_bound]])
+		truncated_sum = integrate.trapezoid(new_probabilities, new_energies)
+		new_spectrum = Spectrum(f"{self.name} above {lower_bound} MeV", new_energies, new_probabilities)
+		return new_spectrum, truncated_sum/total_sum
+
+
+def test_simulation():
+	uniform_spectrum = Spectrum("uniform", array([0., 14.]), array([1., 1.]))
+	simple_box = Solid("box", x=2, y=2, z=2, x_position=1.0)
+	num_particles = 10_000
+	tracks = simulate(
+		"silicon", [simple_box],
+		Beam("proton", uniform_spectrum, diameter=2),
+		num_particles=num_particles)
+	incident_tracks = tracks[tracks["TrackID"] == 1]
+	assert isclose(incident_tracks.size, num_particles/2, atol=100)
+	assert all(incident_tracks["x_incident"] >= 0)
+	assert all(hypot(incident_tracks["x_incident"], incident_tracks["y_incident"]) <= 1.)
+	assert all(incident_tracks["E_beamMeV"] <= 14.)
+	assert isclose(count_nonzero(incident_tracks["E_beamMeV"] > 10.), incident_tracks.size*2/7, atol=100)
+	assert all(incident_tracks["theta"] == 0.)
+
+
+def test_spectrum():
+	whole_spectrum = Spectrum(
+		"test",
+		array([5., 15., 20.]),
+		array([1.0, 0.0, 0.0]),
+	)
+	truncated_spectrum, truncated_fraction = whole_spectrum.truncate(10.)
+	assert isclose(truncated_fraction, 1/4)
+	assert all(isclose(truncated_spectrum.energies, [10., 15., 20.]))
+	assert all(isclose(truncated_spectrum.probabilities, [0.5, 0.0, 0.0]))
