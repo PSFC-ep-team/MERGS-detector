@@ -47,6 +47,11 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 	get the optimal dimensions and thresholds for a detector of the given material with at least the given signal sensitivity
 	:return: the width (mm), the depth (mm), the lower threshold (MeV), the upper threshold (MeV), and the achieved background sensitivity
 	"""
+	if material == "silicon":
+		max_depth = 1.0
+	else:
+		max_depth = 100.0
+
 	result = optimize.minimize(
 		lambda x: calculate_background_sensitivity(material, *x),  # find the lowest background sensitivity
 		constraints=[
@@ -59,8 +64,8 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 		],
 		x0=[15., 40., 8.0, 16.8],
 		bounds=[
-			(1., 50.),  # TODO: account for the fact that a silicon detector can't be that thicc
-			(0.2, 100.),
+			(1., 50.),
+			(0.1, max_depth),
 			(0.0, 16.6),
 			(0.0, 16.8),
 		],
