@@ -6,7 +6,7 @@ import os
 import subprocess
 import xml.etree.ElementTree as xml
 
-from numpy import pi, genfromtxt, savetxt, concatenate, sin, cos, array, radians, stack, interp, isclose, hypot, count_nonzero
+from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero
 from numpy.typing import NDArray
 from scipy import integrate
 
@@ -68,7 +68,7 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 			xml.SubElement(material_info, "composite", ref=element, n=f"{abundance}")
 	material_info = xml.SubElement(
 		materials, "material", name="vacuum", state="gas")
-	xml.SubElement(material_info, "D", value="1e-25", unit="g/cm3")
+	xml.SubElement(material_info, "D", value="0", unit="g/cm3")
 	xml.SubElement(material_info, "composite", ref="N", n="1.0")
 
 	# specify output settings
