@@ -52,14 +52,13 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 
 	# truncate the spectrum to save time, since nothing lower than the lower threshold matters
 	if type(beam.energy) is Spectrum:
-		truncated_spectrum, upper_fraction = beam.energy.truncate(detector.lower_threshold)
-		num_feasible_particles = round(num_particles*upper_fraction)
+		truncated_spectrum, simulated_fraction = beam.energy.truncate(detector.lower_threshold)
 		beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.distance, beam.ambient)
 	else:
-		num_feasible_particles = num_particles
+		simulated_fraction = 1
 
 	# do the simulation
-	energy_deposited = calculate_response(detector, beam, num_feasible_particles)
+	energy_deposited = calculate_response(detector, beam, num_particles)
 
 	# calculate the sensitivity
 	num_detected = count_nonzero(
@@ -71,7 +70,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 		num_total = count_nonzero(energy_deposited > 0)
 	else:
 		num_total = num_particles
-	sensitivity = num_detected/num_total
+	sensitivity = num_detected/(num_total/simulated_fraction)
 
 	if use_cache:
 		os.makedirs("results", exist_ok=True)
@@ -92,7 +91,7 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> N
 		)],
 		beam,
 		num_particles)
-	return histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, num_particles))[0]
+	return histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, num_particles))[0]  # TODO: account for finite photon statistics
 
 
 class Detector:
