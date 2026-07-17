@@ -59,7 +59,7 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 		],
 		x0=[15., 40., 8.0, 16.8],
 		bounds=[
-			(1., 50.),
+			(1., 50.),  # TODO: account for the fact that a silicon detector can't be that thicc
 			(0.2, 100.),
 			(0.0, 16.6),
 			(0.0, 16.8),
@@ -131,7 +131,7 @@ if __name__ == "__main__":
 			concatenate([[0], fronts[material][:, 5]]),
 			styles[material], label=material)
 	plt.grid()
-	plt.xlim(0, git )
+	plt.xlim(0, 100)
 	plt.ylim(0, 1)
 	plt.xlabel("Background sensitivity (mm²)")
 	plt.ylabel("Signal sensitivity")

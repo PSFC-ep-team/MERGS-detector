@@ -23,3 +23,16 @@ A few directories are automaticly generated sometimes.  Specificly:
 * `figures/` is where all generated plots go.
 * `results/` is where caches and calculated pareto fronts go.
 * `run/` is where grasshopper is actually run, so that's where you'll find its raw outputs and any WRL files.
+
+## Installation
+
+I mean there's no installation needed but if you're installing Grasshopper the instructions on GitHub are really not sufficient.
+For example, if you don't have "FindGeant4.cmake" (which I don't even know what that is)
+then you need this argument on cmake:
+```bash
+cmake -DGeant4_DIR=/home/kunimune/geant4-v11.4.1-install/lib/cmake/Geant4/ ..
+make
+sudo make install
+```
+
+And don't put `-jN` or `-j8` or whatever on `make`; it automaticly infers how many cores you have if you don't pass anything, which seems like what you want.
