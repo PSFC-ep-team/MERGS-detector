@@ -6,7 +6,7 @@ import os
 import subprocess
 import xml.etree.ElementTree as xml
 
-from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero
+from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero, diff
 from numpy.typing import NDArray
 from scipy import integrate
 
@@ -201,6 +201,14 @@ class Beam:
 
 class Spectrum:
 	def __init__(self, name: str, energies: NDArray, probabilities: NDArray):
+		if any(diff(energies) < 0):
+			raise ValueError("spectrum energies must be monotonicly increasing.")
+		if energies[-1] == energies[0]:
+			raise ValueError("the spectrum must have some extent or it's not really normalizable")
+		if any(probabilities < 0):
+			raise ValueError("probability density cannot be negative")
+		if not any(probabilities > 0):
+			raise ValueError("this spectrum is unnormalizable")
 		self.name = name
 		self.energies = energies
 		self.probabilities = probabilities
@@ -210,6 +218,10 @@ class Spectrum:
 
 	def truncate(self, lower_bound: float) -> tuple[Spectrum, float]:
 		""" cut off the part of the spectrum below lower_bound, and return the factor by which this changes the normalization """
+		if lower_bound <= self.energies[0]:
+			return self, 1.0
+		elif lower_bound >= self.energies[-1]:
+			raise ValueError("you're trying to truncate the whole spectrum away.  that would make an unnormalizable spectrum.")
 		total_sum = integrate.trapezoid(self.probabilities, self.energies)
 		above_lower_bound = self.energies > lower_bound
 		p_bound = interp(lower_bound, self.energies, self.probabilities)

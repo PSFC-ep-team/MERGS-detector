@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from matplotlib import pyplot as plt
-from numpy import count_nonzero, inf, linspace, empty_like, histogram, arange
+from numpy import count_nonzero, inf, linspace, empty_like, histogram, arange, array
 from numpy.typing import NDArray
 
 from data import MATERIAL_DATA
@@ -33,12 +33,11 @@ def plot_sensitivity_curves(detector: Detector) -> None:
 	plt.show()
 
 
-def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, ignore_misses=False, use_cache=False) -> float:
+def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, use_cache=False, skip_undetectable_tracks=True) -> float:
 	""" calculate the fraction of these incident particles that are detected by this detector """
 	cache_key = (f"{detector.material_name}, {detector.width}, {detector.depth}, "
 	             f"{detector.lower_threshold}, {detector.upper_threshold}, "
-	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.distance}, {'ambient' if beam.ambient else 'collimated'}, "
-	             f"{'ignore misses' if ignore_misses else 'count misses'}")
+	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.distance}, {'ambient' if beam.ambient else 'collimated'}")
 	if use_cache:
 		# first, try to load it from the cache
 		try:
@@ -52,9 +51,16 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 
 	# truncate the spectrum to save time, since nothing lower than the lower threshold matters
 	if type(beam.energy) is Spectrum:
-		truncated_spectrum, simulated_fraction = beam.energy.truncate(detector.lower_threshold)
-		beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.distance, beam.ambient)
+		if detector.lower_threshold > beam.energy.energies.max():
+			return 0
+		if skip_undetectable_tracks:
+			truncated_spectrum, simulated_fraction = beam.energy.truncate(detector.lower_threshold)
+			beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.distance, beam.ambient)
+		else:
+			simulated_fraction = 1
 	else:
+		if detector.lower_threshold > beam.energy:
+			return 0
 		simulated_fraction = 1
 
 	# do the simulation
@@ -66,11 +72,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 		(energy_deposited >= detector.lower_threshold) &
 		(energy_deposited <= detector.upper_threshold)
 	)
-	if ignore_misses:
-		num_total = count_nonzero(energy_deposited > 0)
-	else:
-		num_total = num_particles
-	sensitivity = num_detected/(num_total/simulated_fraction)
+	sensitivity = num_detected/(num_particles/simulated_fraction)
 
 	if use_cache:
 		os.makedirs("results", exist_ok=True)
@@ -78,7 +80,6 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 			file.write(f"{cache_key} -> {sensitivity}\n")
 
 	return sensitivity
-
 
 
 def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> NDArray:
@@ -113,6 +114,19 @@ class Detector:
 		self.length = length
 		self.lower_threshold = lower_threshold
 		self.upper_threshold = upper_threshold
+
+
+def test_spectral_truncation():
+	detector = Detector("EJ-276", 20., 50., lower_threshold=18)
+	spectrum = Spectrum("uniform", array([10., 20.]), array([1., 1.]))
+	num_particles = 1_000_000
+	pure_sensitivity = calculate_sensitivity(
+		detector, Beam("electron", spectrum),
+		num_particles=num_particles, skip_undetectable_tracks=False)
+	clever_sensitivity = calculate_sensitivity(
+		detector, Beam("electron", spectrum),
+		num_particles=num_particles, skip_undetectable_tracks=True)
+	assert abs(pure_sensitivity - clever_sensitivity)/pure_sensitivity < 0.001
 
 
 if __name__ == "__main__":
