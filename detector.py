@@ -88,7 +88,7 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> N
 		detector.material_name,
 		[Solid(
 			"box",
-			x=detector.width, y=100, z=detector.depth,
+			x=detector.width, y=10.0, z=detector.depth,
 		)],
 		beam,
 		num_particles)
@@ -96,13 +96,13 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> N
 
 
 class Detector:
-	def __init__(self, material: str, width: float, depth: float, length=100., lower_threshold=0., upper_threshold=inf):
+	def __init__(self, material: str, width: float, depth: float, length=10.0, lower_threshold=0., upper_threshold=inf):
 		"""
 		a single channel of an electron detector
 		:param material: the name of the detection material
-		:param width: the scale of the detector in the dispersive direction (mm)
-		:param depth: the scale of the detector in the beam direction (mm)
-		:param length: the scale of the detector in the nondispersive direction (mm)
+		:param width: the scale of the detector in the dispersive direction (cm)
+		:param depth: the scale of the detector in the beam direction (cm)
+		:param length: the scale of the detector in the nondispersive direction (cm)
 		:param lower_threshold: the minimum amount of energy in a pulse to be detected (MeV)
 		:param upper_threshold: the maximum amount of energy in a pulse to be detected (MeV)
 		"""
@@ -117,7 +117,7 @@ class Detector:
 
 
 def test_spectral_truncation():
-	detector = Detector("EJ-276", 20., 50., lower_threshold=18)
+	detector = Detector("EJ-276", 2.0, 5.0, lower_threshold=18)
 	spectrum = Spectrum("uniform", array([10., 20.]), array([1., 1.]))
 	num_particles = 1_000_000
 	pure_sensitivity = calculate_sensitivity(
@@ -130,4 +130,4 @@ def test_spectral_truncation():
 
 
 if __name__ == "__main__":
-	plot_sensitivity_curves(Detector("LaBr3", 10, 30, lower_threshold=8.25))
+	plot_sensitivity_curves(Detector("LaBr3", 1.0, 3.0, lower_threshold=8.25))

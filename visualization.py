@@ -13,10 +13,10 @@ def plot_moliere_radius(material: str, beam: Beam, num_particles=10000) -> float
 	"""
 	calculate the moliere radius of this material and plot it
 	"""
-	radius_bins = linspace(0, 100, 101)
+	radius_bins = linspace(0, 10, 101)
 	cylinders = []
 	for i in range(1, radius_bins.size):
-		cylinders.append(Solid("tube", z=200, deltaphi=2*pi, rmin=radius_bins[i - 1], rmax=radius_bins[i]))
+		cylinders.append(Solid("tube", z=20, deltaphi=2*pi, rmin=radius_bins[i - 1], rmax=radius_bins[i]))
 	tracks = simulate(material, cylinders, beam, num_particles)
 	deposition = histogram(
 		tracks["detector"], weights=tracks["E_depositedMeV"], bins=arange(len(cylinders) + 1))[0]
@@ -31,7 +31,7 @@ def plot_moliere_radius(material: str, beam: Beam, num_particles=10000) -> float
 	plt.axvline(moliere_radius, linestyle="dashed", color="k")
 	plt.xlim(0, 1.5*moliere_radius)
 	plt.ylim(0, None)
-	plt.xlabel("Radius (mm)")
+	plt.xlabel("Radius (cm)")
 	plt.ylabel("Deposition distribution")
 	plt.title(material)
 	plt.tight_layout()
@@ -114,5 +114,5 @@ if __name__ == "__main__":
 	plot_moliere_radius("LYSO", Beam("electron", 16.7))
 	plot_moliere_radius("LaBr3", Beam("electron", 16.7))
 	plot_moliere_radius("EJ-276", Beam("electron", 16.7))
-	plot_histogram(Detector("EJ-276", 50, 80), Beam("electron", 16.7))
-	plot_heatmap(Detector("EJ-100", 50, 80), Beam("electron", 16.7))
+	plot_histogram(Detector("EJ-276", 5, 8), Beam("electron", 16.7))
+	plot_heatmap(Detector("EJ-100", 5, 8), Beam("electron", 16.7))
