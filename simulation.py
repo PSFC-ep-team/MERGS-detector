@@ -6,7 +6,7 @@ import os
 import subprocess
 import xml.etree.ElementTree as xml
 
-from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero
+from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero, diff
 from numpy.typing import NDArray
 from scipy import integrate
 
@@ -29,7 +29,7 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	# check the ambient flag.  if so, we need to use an "omnidirectional" beam.
 	if beam.ambient:
 		xml.SubElement(definitions, "quantity",
-		               name="WorldRadius", type="coordinate", value=f"{beam.distance}", unit="mm")
+		               name="WorldRadius", type="coordinate", value=f"{beam.distance}", unit="cm")
 		source_position = "0"
 		source_code = "-3"
 	else:
@@ -89,13 +89,13 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	# specify the bean
 	xml.SubElement(definitions, "constant", name="RandomGenSeed", value="0")
 	xml.SubElement(definitions, "quantity",
-	               name="BeamOffsetX", type="coordinate", value="0", unit="mm")
+	               name="BeamOffsetX", type="coordinate", value="0", unit="cm")
 	xml.SubElement(definitions, "quantity",
-	               name="BeamOffsetY", type="coordinate", value="0", unit="mm")
+	               name="BeamOffsetY", type="coordinate", value="0", unit="cm")
 	xml.SubElement(definitions, "quantity",
-	               name="BeamOffsetZ", type="coordinate", value=source_position, unit="mm")
+	               name="BeamOffsetZ", type="coordinate", value=source_position, unit="cm")
 	xml.SubElement(definitions, "quantity",
-	               name="BeamSize", type="coordinate", value=source_code, unit="mm")
+	               name="BeamSize", type="coordinate", value=source_code, unit="cm")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamEnergy", type="energy", value=energy_code, unit="MeV")
 	xml.SubElement(definitions, "constant", name="EventsToRun", value=f"{num_particles}")
@@ -104,9 +104,9 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	# specify the geometry
 	for i, solid in enumerate(solids):
 		xml.SubElement(solid_group, solid.kind, name=f"solid{i}",
-		               lunit="mm", **{key: f"{value}" for key, value in solid.kwargs.items()})
+		               lunit="cm", **{key: f"{value}" for key, value in solid.kwargs.items()})
 	xml.SubElement(solid_group, "box", name="infinite_void",
-	               x="300", y="300", z="300", lunit="mm")
+	               x="300", y="300", z="300", lunit="cm")
 
 	# fill in the remaining information
 	for i, solid in enumerate(solids):
@@ -121,7 +121,7 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 		volume_specification = xml.SubElement(world_volume, "physvol", name=name)
 		xml.SubElement(volume_specification, "volumeref", ref=f"solid{i}_log")
 		xml.SubElement(
-			volume_specification, "position", name=f"solid{i}_pos", unit="mm",
+			volume_specification, "position", name=f"solid{i}_pos", unit="cm",
 			x=f"{solid.x_position}", y=f"{solid.y_position}", z=f"{solid.z_position}")
 		if solid.x_rotation != 0 or solid.y_rotation != 0 or solid.z_rotation != 0:
 			xml.SubElement(
@@ -151,6 +151,10 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 		output_data = genfromtxt("run/output.dat", names=True, comments=None)
 	except FileNotFoundError:
 		raise RuntimeError("Geant4 failed to run.")
+	# convert mm to cm
+	output_data["x_incident"] /= 10
+	output_data["y_incident"] /= 10
+	output_data["z_incident"] /= 10
 	return output_data
 
 
@@ -178,12 +182,12 @@ class Solid:
 
 
 class Beam:
-	def __init__(self, particle: str, energy: float | Spectrum, diameter=0.0, distance=100.0, ambient=False):
+	def __init__(self, particle: str, energy: float | Spectrum, diameter=0.0, distance=10.0, ambient=False):
 		"""
 		a type of radiation
 		:param particle: the name of the particle
 		:param energy: the energy of each particle (MeV)
-		:param diameter: the diameter of the beam (mm)
+		:param diameter: the diameter of the beam (cm)
 		:param distance: the standoff distance of the source from the origin
 		:param ambient: whether particles should come from all directions instead of just z-
 		"""
@@ -201,6 +205,14 @@ class Beam:
 
 class Spectrum:
 	def __init__(self, name: str, energies: NDArray, probabilities: NDArray):
+		if any(diff(energies) < 0):
+			raise ValueError("spectrum energies must be monotonicly increasing.")
+		if energies[-1] == energies[0]:
+			raise ValueError("the spectrum must have some extent or it's not really normalizable")
+		if any(probabilities < 0):
+			raise ValueError("probability density cannot be negative")
+		if not any(probabilities > 0):
+			raise ValueError("this spectrum is unnormalizable")
 		self.name = name
 		self.energies = energies
 		self.probabilities = probabilities
@@ -210,6 +222,10 @@ class Spectrum:
 
 	def truncate(self, lower_bound: float) -> tuple[Spectrum, float]:
 		""" cut off the part of the spectrum below lower_bound, and return the factor by which this changes the normalization """
+		if lower_bound <= self.energies[0]:
+			return self, 1.0
+		elif lower_bound >= self.energies[-1]:
+			raise ValueError("you're trying to truncate the whole spectrum away.  that would make an unnormalizable spectrum.")
 		total_sum = integrate.trapezoid(self.probabilities, self.energies)
 		above_lower_bound = self.energies > lower_bound
 		p_bound = interp(lower_bound, self.energies, self.probabilities)
@@ -231,7 +247,7 @@ def test_simulation():
 	incident_tracks = tracks[tracks["TrackID"] == 1]
 	assert isclose(incident_tracks.size, num_particles/2, atol=100)
 	assert all(incident_tracks["x_incident"] >= 0)
-	assert all(hypot(incident_tracks["x_incident"], incident_tracks["y_incident"]) <= 1.)
+	assert all(hypot(incident_tracks["x_incident"], incident_tracks["y_incident"]) <= 1. + 1e-7)
 	assert all(incident_tracks["E_beamMeV"] <= 14.)
 	assert isclose(count_nonzero(incident_tracks["E_beamMeV"] > 10.), incident_tracks.size*2/7, atol=100)
 	assert all(incident_tracks["theta"] == 0.)

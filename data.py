@@ -43,7 +43,7 @@ MATERIAL_DATA = {
 		},
 	},
 	"silicon": {
-		"density": 7.992,
+		"density": 2.329,
 		"elements": {
 			"Si": 1,
 		},

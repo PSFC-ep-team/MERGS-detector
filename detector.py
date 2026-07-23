@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from matplotlib import pyplot as plt
-from numpy import count_nonzero, inf, linspace, empty_like, histogram, arange
+from numpy import count_nonzero, inf, linspace, empty_like, histogram, arange, array
 from numpy.typing import NDArray
 
 from data import MATERIAL_DATA
@@ -33,12 +33,11 @@ def plot_sensitivity_curves(detector: Detector) -> None:
 	plt.show()
 
 
-def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, ignore_misses=False, use_cache=False) -> float:
+def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, use_cache=False, skip_undetectable_tracks=True) -> float:
 	""" calculate the fraction of these incident particles that are detected by this detector """
 	cache_key = (f"{detector.material_name}, {detector.width}, {detector.depth}, "
 	             f"{detector.lower_threshold}, {detector.upper_threshold}, "
-	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.distance}, {'ambient' if beam.ambient else 'collimated'}, "
-	             f"{'ignore misses' if ignore_misses else 'count misses'}")
+	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.distance}, {'ambient' if beam.ambient else 'collimated'}")
 	if use_cache:
 		# first, try to load it from the cache
 		try:
@@ -52,9 +51,16 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 
 	# truncate the spectrum to save time, since nothing lower than the lower threshold matters
 	if type(beam.energy) is Spectrum:
-		truncated_spectrum, simulated_fraction = beam.energy.truncate(detector.lower_threshold)
-		beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.distance, beam.ambient)
+		if detector.lower_threshold > beam.energy.energies.max():
+			return 0
+		if skip_undetectable_tracks:
+			truncated_spectrum, simulated_fraction = beam.energy.truncate(detector.lower_threshold)
+			beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.distance, beam.ambient)
+		else:
+			simulated_fraction = 1
 	else:
+		if detector.lower_threshold > beam.energy:
+			return 0
 		simulated_fraction = 1
 
 	# do the simulation
@@ -66,11 +72,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 		(energy_deposited >= detector.lower_threshold) &
 		(energy_deposited <= detector.upper_threshold)
 	)
-	if ignore_misses:
-		num_total = count_nonzero(energy_deposited > 0)
-	else:
-		num_total = num_particles
-	sensitivity = num_detected/(num_total/simulated_fraction)
+	sensitivity = num_detected/(num_particles/simulated_fraction)
 
 	if use_cache:
 		os.makedirs("results", exist_ok=True)
@@ -80,14 +82,13 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, i
 	return sensitivity
 
 
-
 def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> NDArray:
 	""" run a simulation for this detector and extract the total energy deposition of each particle """
 	tracks = simulate(
 		detector.material_name,
 		[Solid(
 			"box",
-			x=detector.width, y=100, z=detector.depth,
+			x=detector.width, y=10.0, z=detector.depth,
 		)],
 		beam,
 		num_particles)
@@ -95,13 +96,13 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> N
 
 
 class Detector:
-	def __init__(self, material: str, width: float, depth: float, length=100., lower_threshold=0., upper_threshold=inf):
+	def __init__(self, material: str, width: float, depth: float, length=10.0, lower_threshold=0., upper_threshold=inf):
 		"""
 		a single channel of an electron detector
 		:param material: the name of the detection material
-		:param width: the scale of the detector in the dispersive direction (mm)
-		:param depth: the scale of the detector in the beam direction (mm)
-		:param length: the scale of the detector in the nondispersive direction (mm)
+		:param width: the scale of the detector in the dispersive direction (cm)
+		:param depth: the scale of the detector in the beam direction (cm)
+		:param length: the scale of the detector in the nondispersive direction (cm)
 		:param lower_threshold: the minimum amount of energy in a pulse to be detected (MeV)
 		:param upper_threshold: the maximum amount of energy in a pulse to be detected (MeV)
 		"""
@@ -115,5 +116,18 @@ class Detector:
 		self.upper_threshold = upper_threshold
 
 
+def test_spectral_truncation():
+	detector = Detector("EJ-276", 2.0, 5.0, lower_threshold=18)
+	spectrum = Spectrum("uniform", array([10., 20.]), array([1., 1.]))
+	num_particles = 1_000_000
+	pure_sensitivity = calculate_sensitivity(
+		detector, Beam("electron", spectrum),
+		num_particles=num_particles, skip_undetectable_tracks=False)
+	clever_sensitivity = calculate_sensitivity(
+		detector, Beam("electron", spectrum),
+		num_particles=num_particles, skip_undetectable_tracks=True)
+	assert abs(pure_sensitivity - clever_sensitivity)/pure_sensitivity < 0.001
+
+
 if __name__ == "__main__":
-	plot_sensitivity_curves(Detector("LaBr3", 10, 30, lower_threshold=8.25))
+	plot_sensitivity_curves(Detector("LaBr3", 1.0, 3.0, lower_threshold=8.25))
