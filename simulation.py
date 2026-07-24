@@ -20,6 +20,8 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	if the beam has an x_limit, the number of particles you get may not be exactly the number you requested.
 	:return: the track data from Grasshopper and the total number of tracks simulated
 	"""
+	os.makedirs("run", exist_ok=True)
+
 	# start by instantiating the input deck
 	input_deck = xml.Element("gdml", {
 		"xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
@@ -145,7 +147,6 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	xml.SubElement(setup, "world", ref="world_log")
 
 	# write to disc
-	os.makedirs("run", exist_ok=True)
 	tree = xml.ElementTree(input_deck)
 	xml.indent(tree)
 	tree.write("run/input.gdml", xml_declaration=True, encoding="UTF-8")
@@ -157,7 +158,9 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 		pass
 
 	# call the executable
-	subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run")
+	print(f"Simulating {num_particles} {beam.particle_name}s...", end=" ")
+	subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run/", stdout=subprocess.DEVNULL)
+	print(f"done!")
 
 	# read the output
 	try:
