@@ -6,15 +6,20 @@ import os
 import subprocess
 import xml.etree.ElementTree as xml
 
-from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero, diff
+from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero, diff, \
+	sqrt, arcsin, pi, unique, inf
 from numpy.typing import NDArray
 from scipy import integrate
 
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 
-def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles: int, debug_mode=False) -> NDArray:
-	""" run a Geant4 simulation of a beam of these particles hitting a detector """
+def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles: int, debug_mode=False) -> tuple[NDArray, int]:
+	"""
+	run a Geant4 simulation of a beam of these particles hitting a detector.
+	if the beam has an x_limit, the number of particles you get may not be exactly the number you requested.
+	:return: the track data from Grasshopper and the total number of tracks simulated
+	"""
 	# start by instantiating the input deck
 	input_deck = xml.Element("gdml", {
 		"xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
@@ -46,6 +51,14 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 		except FileNotFoundError:
 			pass
 		energy_code = f"{beam.energy}"
+
+	# check if we're applying an x-limit to the bean.  if so, we need to augment the number of simulated particles.
+	if beam.x_limit < beam.diameter/2:
+		x_twiddle = beam.x_limit/(beam.diameter/2)
+		valid_fraction = 2/pi*(arcsin(x_twiddle) + x_twiddle*sqrt(1 - x_twiddle**2))
+		if valid_fraction < 0.1:
+			raise ValueError("oh no, I don't like how much the runtime just got augmented.")
+		num_particles = round(num_particles/valid_fraction)
 
 	# first apply detector_material to every detector solid
 	for solid in solids:
@@ -155,7 +168,25 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	output_data["x_incident"] /= 10
 	output_data["y_incident"] /= 10
 	output_data["z_incident"] /= 10
-	return output_data
+
+	# filter out phony particles if we wanted a non-circular beam
+	if beam.x_limit < beam.diameter/2:
+		num_particles_recorded = len(unique(output_data["EventID"]))
+		if num_particles_recorded/num_particles < 0.99:
+			raise ValueError(
+				"because of the way grasshopper is, I can't limit the beam unless all of the particles are incident on "
+				"more or less the same solid material (because any geometric correlations will cause me to incorrectly "
+				"estimate how many particles were simulated in the specified beam limits that we _didn't_ see).  "
+				"however, the fact that {1 - num_particles_recorded/num_particles:.1%} of the particles did not "
+				"interact with any matter leads me to suspect that some of them are missing the detector entirely.")
+		valid = abs(output_data["x_incident"]) <= beam.x_limit
+		output_data = output_data[valid]
+		num_particles_recorded_in_bounds = len(output_data)
+		num_particles = round(num_particles_recorded_in_bounds/num_particles_recorded*num_particles)
+		reduced_old_event_indices, new_event_indices = unique(output_data["EventID"], return_inverse=True)
+		output_data["EventID"] = new_event_indices  # remember to re-index the events
+
+	return output_data, num_particles
 
 
 def rotation_matrix(θ):
@@ -182,12 +213,13 @@ class Solid:
 
 
 class Beam:
-	def __init__(self, particle: str, energy: float | Spectrum, diameter=0.0, distance=10.0, ambient=False):
+	def __init__(self, particle: str, energy: float | Spectrum, diameter=0.0, x_limit=inf, distance=10.0, ambient=False):
 		"""
 		a type of radiation
 		:param particle: the name of the particle
 		:param energy: the energy of each particle (MeV)
 		:param diameter: the diameter of the beam (cm)
+		:param x_limit: a limit on the absolute value of x, which
 		:param distance: the standoff distance of the source from the origin
 		:param ambient: whether particles should come from all directions instead of just z-
 		"""
@@ -197,6 +229,7 @@ class Beam:
 		self.number = PARTICLE_DATA[particle]["number"]
 		self.energy = energy
 		self.diameter = diameter
+		self.x_limit = x_limit
 		self.distance = distance
 		self.ambient = ambient
 		if ambient and diameter != 0:
@@ -240,7 +273,7 @@ def test_simulation():
 	uniform_spectrum = Spectrum("uniform", array([0., 14.]), array([1., 1.]))
 	simple_box = Solid("box", x=2, y=2, z=2, x_position=1.0)
 	num_particles = 10_000
-	tracks = simulate(
+	tracks, _ = simulate(
 		"silicon", [simple_box],
 		Beam("proton", uniform_spectrum, diameter=2),
 		num_particles=num_particles)
@@ -251,6 +284,17 @@ def test_simulation():
 	assert all(incident_tracks["E_beamMeV"] <= 14.)
 	assert isclose(count_nonzero(incident_tracks["E_beamMeV"] > 10.), incident_tracks.size*2/7, atol=100)
 	assert all(incident_tracks["theta"] == 0.)
+
+
+def test_beam_limiting():
+	simple_box = Solid("box", x=2, y=2, z=2)
+	num_particles = 10_000
+	tracks, _ = simulate(
+		"silicon", [simple_box],
+		Beam("proton", energy=14, diameter=2, x_limit=0.5),
+		num_particles=num_particles)
+	incident_tracks = tracks[tracks["TrackID"] == 1]
+	assert isclose(len(incident_tracks), 10_000, atol=100)
 
 
 def test_spectrum():

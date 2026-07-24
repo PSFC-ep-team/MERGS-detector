@@ -4,37 +4,15 @@ from __future__ import annotations
 
 import os
 
-from matplotlib import pyplot as plt
-from numpy import count_nonzero, inf, linspace, empty_like, histogram, arange, array
+from numpy import count_nonzero, inf, histogram, arange, array, isclose
 from numpy.typing import NDArray
 
 from data import MATERIAL_DATA
 from simulation import Beam, simulate, Solid, Spectrum
 
 
-def plot_sensitivity_curves(detector: Detector) -> None:
-	""" calculate the sensitivity of a detector to all types and energies of radiation """
-	energies = linspace(1, 17, 18)
-	plt.figure()
-	for particle, color in [("electron", "tab:orange"), ("photon", "tab:green"), ("neutron", "tab:gray")]:
-		sensitivities = empty_like(energies)
-		for i, energy in enumerate(energies):
-			print(f"{energy:.2g} MeV {particle}s")
-			sensitivities[i] = calculate_sensitivity(detector, Beam(particle, energy, ambient=(particle != "electron")))
-		plt.plot(energies, sensitivities, color=color, label=particle)
-	os.makedirs("figures", exist_ok=True)
-	plt.legend()
-	plt.grid()
-	plt.xlabel("Incident energy")
-	plt.ylabel("Sensitivity")
-	plt.ylim(0, 1)
-	plt.xlim(0, 18)
-	plt.savefig("figures/sensitivity_curves.pdf")
-	plt.show()
-
-
-def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, use_cache=False, skip_undetectable_tracks=True) -> float:
-	""" calculate the fraction of these incident particles that are detected by this detector """
+def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, use_cache=False, skip_undetectable_tracks=True) -> tuple[float, float]:
+	""" calculate the fraction of these incident particles that are detected by this detector and by adjacent detectors """
 	cache_key = (f"{detector.material_name}, {detector.width}, {detector.depth}, "
 	             f"{detector.lower_threshold}, {detector.upper_threshold}, "
 	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.distance}, {'ambient' if beam.ambient else 'collimated'}")
@@ -45,64 +23,91 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 				for line in file.readlines():
 					input_string, output_string = line.split(" -> ")
 					if input_string == cache_key:
-						return float(output_string)
+						direct_sensitivity, cross_sensitivity = output_string.split(",")
+						return float(direct_sensitivity), float(cross_sensitivity)
 		except FileNotFoundError:
 			pass
 
 	# truncate the spectrum to save time, since nothing lower than the lower threshold matters
 	if type(beam.energy) is Spectrum:
 		if detector.lower_threshold > beam.energy.energies.max():
-			return 0
+			return 0, 0
 		if skip_undetectable_tracks:
 			truncated_spectrum, simulated_fraction = beam.energy.truncate(detector.lower_threshold)
-			beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.distance, beam.ambient)
+			beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.x_limit, beam.distance, beam.ambient)
 		else:
 			simulated_fraction = 1
 	else:
 		if detector.lower_threshold > beam.energy:
-			return 0
+			return 0, 0
 		simulated_fraction = 1
 
 	# do the simulation
-	energy_deposited = calculate_response(detector, beam, num_particles)
+	energy_deposited_directly, energy_deposited_indirectly = calculate_response(detector, beam, num_particles)
 
-	# calculate the sensitivity
+	# calculate the sensitivity to signal
 	num_detected = count_nonzero(
-		(energy_deposited > 0) &
-		(energy_deposited >= detector.lower_threshold) &
-		(energy_deposited <= detector.upper_threshold)
+		(energy_deposited_directly > 0) &
+		(energy_deposited_directly >= detector.lower_threshold) &
+		(energy_deposited_directly <= detector.upper_threshold)
 	)
-	sensitivity = num_detected/(num_particles/simulated_fraction)
+	direct_sensitivity = num_detected/(num_particles/simulated_fraction)
+
+	# calculate the sensitivity to cross-talk
+	num_detected = count_nonzero(
+		(energy_deposited_indirectly > 0) &
+		(energy_deposited_indirectly >= detector.lower_threshold) &
+		(energy_deposited_indirectly <= detector.upper_threshold)
+	)
+	cross_sensitivity = num_detected/(num_particles/simulated_fraction)
 
 	if use_cache:
 		os.makedirs("results", exist_ok=True)
 		with open("results/cache.txt", mode="a") as file:
-			file.write(f"{cache_key} -> {sensitivity}\n")
+			file.write(f"{cache_key} -> {direct_sensitivity}, {cross_sensitivity}\n")
 
-	return sensitivity
+	return direct_sensitivity, cross_sensitivity
 
 
-def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> NDArray:
-	""" run a simulation for this detector and extract the total energy deposition of each particle """
-	tracks = simulate(
+def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> tuple[NDArray, NDArray]:
+	""" run a simulation for this detector and extract the total energy deposition of each particle in both this and adjacent detectors """
+	solids = []
+	# instantiate three adjacent detectors
+	for x in [-detector.width - detector.separation, 0, detector.width + detector.separation]:
+		solids.append(Solid("box", x_position=x, x=detector.width, y=detector.length, z=detector.depth))
+	# instantiate some thin foil between them
+	if detector.separation != 0:
+		for x in [-detector.width/2 - detector.separation/2, detector.width/2 + detector.separation/2]:
+			solids.append(Solid("box", x_position=x, x=detector.separation, y=detector.length, z=detector.depth, material="aluminum"))
+
+	# run the simulation
+	tracks, num_particles = simulate(
 		detector.material_name,
-		[Solid(
-			"box",
-			x=detector.width, y=10.0, z=detector.depth,
-		)],
+		solids,
 		beam,
 		num_particles)
-	return histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, num_particles))[0]  # TODO: account for finite photon statistics
+
+	# sort particles by detector
+	responses = []
+	for detector_index in range(3):
+		responses.append(histogram(
+			tracks[tracks["detector"] == detector_index]["EventID"],
+			weights=tracks[tracks["detector"] == detector_index]["E_depositedMeV"],
+			bins=arange(-1/2, num_particles),
+		)[0])  # TODO: account for finite photon statistics
+
+	return responses[1], responses[0] + responses[2]  # combine the two adjacent detectors when you return
 
 
 class Detector:
-	def __init__(self, material: str, width: float, depth: float, length=10.0, lower_threshold=0., upper_threshold=inf):
+	def __init__(self, material: str, width: float, depth: float, length=10.0, separation=0.01, lower_threshold=0., upper_threshold=inf):
 		"""
 		a single channel of an electron detector
 		:param material: the name of the detection material
 		:param width: the scale of the detector in the dispersive direction (cm)
 		:param depth: the scale of the detector in the beam direction (cm)
 		:param length: the scale of the detector in the nondispersive direction (cm)
+		:param separation: the amount of aluminum to put between adjacent detectors (cm)
 		:param lower_threshold: the minimum amount of energy in a pulse to be detected (MeV)
 		:param upper_threshold: the maximum amount of energy in a pulse to be detected (MeV)
 		"""
@@ -112,22 +117,19 @@ class Detector:
 		self.width = width
 		self.depth = depth
 		self.length = length
+		self.separation = separation
 		self.lower_threshold = lower_threshold
 		self.upper_threshold = upper_threshold
 
 
 def test_spectral_truncation():
-	detector = Detector("EJ-276", 2.0, 5.0, lower_threshold=18)
+	detector = Detector("EJ-276", 3.0, 6.0, lower_threshold=18)
 	spectrum = Spectrum("uniform", array([10., 20.]), array([1., 1.]))
 	num_particles = 1_000_000
-	pure_sensitivity = calculate_sensitivity(
+	pure_sensitivity, _ = calculate_sensitivity(
 		detector, Beam("electron", spectrum),
 		num_particles=num_particles, skip_undetectable_tracks=False)
-	clever_sensitivity = calculate_sensitivity(
+	clever_sensitivity, _ = calculate_sensitivity(
 		detector, Beam("electron", spectrum),
 		num_particles=num_particles, skip_undetectable_tracks=True)
-	assert abs(pure_sensitivity - clever_sensitivity)/pure_sensitivity < 0.001
-
-
-if __name__ == "__main__":
-	plot_sensitivity_curves(Detector("LaBr3", 1.0, 3.0, lower_threshold=8.25))
+	assert isclose(pure_sensitivity, clever_sensitivity, rtol=0.005)

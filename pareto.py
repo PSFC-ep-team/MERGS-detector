@@ -21,22 +21,21 @@ INCIDENT_ENERGY = 16.7
 MONOENERGETIC_SPECTRUM = Spectrum("16.5–16.9", array([INCIDENT_ENERGY - 0.2, INCIDENT_ENERGY + 0.2]), array([1., 1.]))
 BACKGROUND_ENERGIES = linspace(0.5, 14, 21)
 BACKGROUND_SPECTRUM = Spectrum("E⁻²", BACKGROUND_ENERGIES, BACKGROUND_ENERGIES**-2)
+BACKGROUND_FLUENCE = 1e3  # neutron/cm²/electron
 
 
 def plot_responses(detector: Detector):
 	""" plot the response of a given detector design to all three kinds of radiation """
-	background_fluence = 1.0  # neutron/cm²/electron
-
-	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*detector.width)
+	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*detector.width, x_limit=(detector.width + detector.separation)/2)
 	electron_response = calculate_response(detector, electron_beam, num_particles=100_000)
-	electron_weight = 1/(100_000*(sqrt(3)/(2*pi) + 1/3))
+	electron_weight = 1/100_000
 	world_radius = sqrt(detector.width**2 + detector.depth**2 + detector.length**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
 	neutron_response = calculate_response(detector, neutron_beam, num_particles=1_000_000)
-	neutron_weight = background_fluence*4*pi*world_radius**2/1_000_000
+	neutron_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/1_000_000
 	photon_beam = Beam("photon", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
 	photon_response = calculate_response(detector, photon_beam, num_particles=1_000_000)
-	photon_weight = background_fluence*4*pi*world_radius**2/1_000_000
+	photon_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/1_000_000
 
 	energy_bins = linspace(0.05, 17.05, 86)
 	plt.figure()
@@ -65,7 +64,7 @@ def find_pareto_front(material: str, pulse_shape_discrimination: bool) -> list[t
 	:param material: the material out of which the detector is made
 	:param pulse_shape_discrimination: whether we think there's PSD
 	:return: a bunch of designs specified by their width (cm), depth (cm), lower threshold (MeV), upper threshold (MeV),
-	         background sensitivity (cm²), and signal sensitivity
+	         background sensitivity, and signal sensitivity
 	"""
 	os.makedirs("results", exist_ok=True)
 
@@ -81,7 +80,7 @@ def find_pareto_front(material: str, pulse_shape_discrimination: bool) -> list[t
 			relative_upper_threshold = upper_threshold - expected_energy
 			background_sensitivity = calculate_background_sensitivity(
 				material, width, depth, relative_lower_threshold, relative_upper_threshold,
-				include_photons=True, include_neutrons=False)
+				include_photons=True, include_neutrons=False, include_crosstalk=True)
 			results.append((width, depth, lower_threshold, upper_threshold, background_sensitivity, signal_sensitivity))
 
 	else:
@@ -94,7 +93,7 @@ def find_pareto_front(material: str, pulse_shape_discrimination: bool) -> list[t
 			for target_signal_sensitivity in signal_sensitivities:
 				width, depth, lower_threshold, upper_threshold, background_sensitivity, signal_sensitivity = optimize_detector(
 					material, target_signal_sensitivity)
-				logging.info(f"found optimum that achieves {signal_sensitivity:.3g} for signal, {background_sensitivity:.3g} cm² for background")
+				logging.info(f"found optimum that achieves {signal_sensitivity:.3g} for signal, {background_sensitivity:.3g} for background")
 				results.append((width, depth, lower_threshold, upper_threshold, background_sensitivity, signal_sensitivity))
 			savetxt(f"results/pareto_{material}.txt", results)
 			logging.info(f"done!  saved to results/pareto_{material}.txt")
@@ -105,7 +104,7 @@ def find_pareto_front(material: str, pulse_shape_discrimination: bool) -> list[t
 def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, float, float, float, float, float]:
 	"""
 	get the optimal dimensions and thresholds for a detector of the given material with at least the given signal sensitivity
-	:return: the width (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity (cm²), and the achieved signal sensitivity
+	:return: the width (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity, and the achieved signal sensitivity
 	"""
 	if material != "silicon":
 		# optimize with freely varying thickness
@@ -121,7 +120,7 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 				x0=[1.5, initial_depth, -1.0, 1.0],
 				bounds=[
 					(0.1, 5.0),
-					(0.01, 10.0),
+					(0.1, 10.0),
 					(-10., 0.),
 					(0., 10.),
 				],
@@ -182,19 +181,17 @@ def calculate_signal_sensitivity(
 		material=material, width=width, depth=depth,
 		lower_threshold=expected_energy + relative_lower_threshold,
 		upper_threshold=expected_energy + relative_upper_threshold)
-	beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*width)
-	signal_sensitivity = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True)
-	valid_incidence_fraction = sqrt(3)/(2*pi) + 1/3
-	return signal_sensitivity/valid_incidence_fraction
+	beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*width, x_limit=(width + detector.separation)/2)
+	signal_sensitivity, _ = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True)
+	return signal_sensitivity
 
 
 def calculate_background_sensitivity(
 		material: str, width: float, depth: float, relative_lower_threshold: float, relative_upper_threshold: float,
-		include_neutrons=True, include_photons=True
+		include_neutrons=True, include_photons=True, include_crosstalk=True,
 ) -> float:
 	"""
-	the background sensitivity of this detector assuming ambient neutrons and photons with a 1/E² spectrum,
-	in counts per particle/cm²
+	the background sensitivity of this detector assuming ambient neutrons and photons with a 1/E² spectrum
 	"""
 	width = max(0.001, width)
 	depth = max(0.001, depth)
@@ -206,12 +203,18 @@ def calculate_background_sensitivity(
 	world_radius = sqrt(width**2 + depth**2 + detector.length**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
 	photon_beam = Beam("photon", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
+	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*width, x_limit=(width + detector.separation)/2)
 	total_detection_rate = 0.
 	if include_neutrons:
-		total_detection_rate += calculate_sensitivity(detector, neutron_beam, num_particles=1_000_000, use_cache=True)
+		neutron_sensitivity, _ = calculate_sensitivity(detector, neutron_beam, num_particles=1_000_000, use_cache=True)
+		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*neutron_sensitivity
 	if include_photons:
-		total_detection_rate += calculate_sensitivity(detector, photon_beam, num_particles=1_000_000, use_cache=True)
-	return total_detection_rate*4*pi*world_radius**2
+		photon_sensitivity, _ = calculate_sensitivity(detector, photon_beam, num_particles=1_000_000, use_cache=True)
+		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity
+	if include_crosstalk:
+		_, crosstalk_sensitivity = calculate_sensitivity(detector, electron_beam, num_particles=100_000, use_cache=True)
+		total_detection_rate += crosstalk_sensitivity
+	return total_detection_rate
 
 
 def csda_deposition(material: str, initial_energy: float, distance: float) -> float:
@@ -283,7 +286,7 @@ if __name__ == "__main__":
 	plt.grid()
 	plt.xlim(0, 1000)
 	plt.ylim(0, 1)
-	plt.xlabel("Background sensitivity (cm²)")
+	plt.xlabel("Background sensitivity (counts per signal electron)")
 	plt.ylabel("Signal sensitivity")
 	plt.legend()
 	plt.tight_layout()

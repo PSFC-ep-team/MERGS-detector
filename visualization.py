@@ -3,9 +3,9 @@
 import os
 
 from matplotlib import pyplot as plt
-from numpy import linspace, sqrt, diff, histogram, arange, reshape, partition, count_nonzero, pi, cumulative_sum, interp, quantile
+from numpy import linspace, sqrt, diff, histogram, arange, reshape, pi, cumulative_sum, interp, quantile
 
-from detector import Detector, calculate_response
+from detector import Detector
 from simulation import Beam, simulate, Solid
 
 
@@ -17,7 +17,7 @@ def plot_moliere_radius(material: str, beam: Beam, num_particles=10000) -> float
 	cylinders = []
 	for i in range(1, radius_bins.size):
 		cylinders.append(Solid("tube", z=20, deltaphi=2*pi, rmin=radius_bins[i - 1], rmax=radius_bins[i]))
-	tracks = simulate(material, cylinders, beam, num_particles)
+	tracks, _ = simulate(material, cylinders, beam, num_particles)
 	deposition = histogram(
 		tracks["detector"], weights=tracks["E_depositedMeV"], bins=arange(len(cylinders) + 1))[0]
 	total_deposition = sum(deposition)
@@ -39,34 +39,6 @@ def plot_moliere_radius(material: str, beam: Beam, num_particles=10000) -> float
 	plt.show()
 
 	return moliere_radius
-
-
-def plot_histogram(detector: Detector, beam: Beam) -> None:
-	"""
-	visualize the energy distribution of energy deposition in this material
-	:param detector: the detector the particles are hitting
-	:param beam: the species and energy of the particles that are depositing energy
-	"""
-	energy_deposition = calculate_response(detector, beam)
-	bins = linspace(0, 1.05*beam.energy, 51)
-	counts = histogram(energy_deposition, bins=bins, density=True)[0]
-
-	full_deposition = count_nonzero(energy_deposition >= 0.99*beam.energy)/energy_deposition.size
-
-	os.makedirs("figures", exist_ok=True)
-	plt.figure()
-	plt.stairs(counts, bins, fill=True, linewidth=0)
-	plt.text(
-		0.01, 0.99,
-		f"{full_deposition:.1%} of electrons deposit their full energy",
-		ha="left", va="top", transform=plt.gca().transAxes,
-	)
-	plt.xlim(bins[0], bins[-1])
-	plt.ylim(0, min(counts.max()*1.05, partition(counts, -2)[-2]*1.5))
-	plt.xlabel("Energy deposited (MeV)")
-	plt.tight_layout()
-	plt.savefig("figures/deposition_histogram.pdf")
-	plt.show()
 
 
 def plot_heatmap(detector: Detector, beam: Beam, num_particles=10000) -> None:
@@ -95,7 +67,7 @@ def plot_heatmap(detector: Detector, beam: Beam, num_particles=10000) -> None:
 				z=z_sizes[j],
 			))
 
-	tracks = simulate(detector.material_name, grid, beam, num_particles=num_particles)
+	tracks, _ = simulate(detector.material_name, grid, beam, num_particles=num_particles)
 	deposition = reshape(
 		histogram(tracks["detector"], weights=tracks["E_depositedMeV"], bins=arange(len(grid) + 1))[0],
 		shape=(x_positions.size, z_positions.size))
@@ -114,5 +86,4 @@ if __name__ == "__main__":
 	plot_moliere_radius("LYSO", Beam("electron", 16.7))
 	plot_moliere_radius("LaBr3", Beam("electron", 16.7))
 	plot_moliere_radius("EJ-276", Beam("electron", 16.7))
-	plot_histogram(Detector("EJ-276", 5, 8), Beam("electron", 16.7))
 	plot_heatmap(Detector("EJ-100", 5, 8), Beam("electron", 16.7))
