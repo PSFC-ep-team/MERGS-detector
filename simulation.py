@@ -15,6 +15,8 @@ from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles: int, debug_mode=False) -> NDArray:
 	""" run a Geant4 simulation of a beam of these particles hitting a detector """
+	os.makedirs("run", exist_ok=True)
+
 	# start by instantiating the input deck
 	input_deck = xml.Element("gdml", {
 		"xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
@@ -132,7 +134,6 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	xml.SubElement(setup, "world", ref="world_log")
 
 	# write to disc
-	os.makedirs("run", exist_ok=True)
 	tree = xml.ElementTree(input_deck)
 	xml.indent(tree)
 	tree.write("run/input.gdml", xml_declaration=True, encoding="UTF-8")
@@ -144,7 +145,9 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 		pass
 
 	# call the executable
-	subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run")
+	print(f"Simulating {num_particles} {beam.particle_name}s...", end=" ")
+	subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run/", stdout=subprocess.DEVNULL)
+	print(f"done!")
 
 	# read the output
 	try:
