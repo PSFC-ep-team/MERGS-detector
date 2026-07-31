@@ -24,6 +24,64 @@ BACKGROUND_SPECTRUM = Spectrum("E⁻²", BACKGROUND_ENERGIES, BACKGROUND_ENERGIE
 BACKGROUND_FLUENCE = 1e3  # neutron/cm²/electron
 
 
+def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
+	fronts = {}
+	for material in materials:
+		fronts[material] = {}
+		for pulse_shape_discrimination in [False, True]:
+			fronts[material][pulse_shape_discrimination] = array(find_pareto_front(
+				material, pulse_shape_discrimination))
+			if not pulse_shape_discrimination:
+				i = len(fronts[material][pulse_shape_discrimination])//2
+				width, depth, lower_threshold, upper_threshold, _, _ = fronts[material][pulse_shape_discrimination][i, :]
+				plot_responses(Detector(material, width, depth, lower_threshold=lower_threshold, upper_threshold=upper_threshold))
+
+	fronts["silicon"][True] = fronts["silicon"][False]  # silicon detectors can't have PSD
+
+	# plot the pareto fronts of performance
+	plt.figure()
+	for material in materials:
+		plt.errorbar(
+			x=concatenate([[0], fronts[material][False][:, 4]]),
+			y=concatenate([[0], fronts[material][False][:, 5]]),
+			xerr=stack([
+				concatenate([[0], fronts[material][True][:, 4] - fronts[material][False][:, 4]]),
+				zeros(len(fronts[material][False]) + 1)],
+				axis=0,
+			),
+			fmt=styles[material], label=material)
+	plt.grid()
+	plt.xlim(0, 1000)
+	plt.ylim(0, 1)
+	plt.xlabel("Background sensitivity (counts per signal electron)")
+	plt.ylabel("Signal sensitivity")
+	plt.legend()
+	plt.tight_layout()
+	plt.savefig("figures/pareto.pdf")
+
+	# plot the actual design variables
+	fig, axs = plt.subplots(3, 1, sharex=True, gridspec_kw=dict(hspace=0))
+	for material in materials:
+		axs[0].plot(fronts[material][False][:, 5], fronts[material][False][:, 0], styles[material], label=material)
+		axs[1].plot(fronts[material][False][:, 5], fronts[material][False][:, 1], styles[material])
+		axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 2], styles[material])
+		axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 3], styles[material])
+	axs[0].legend()
+	axs[0].grid()
+	axs[0].set_ylabel("Width (cm)")
+	axs[0].set_ylim(0, None)
+	axs[1].grid()
+	axs[1].set_ylabel("Depth (cm)")
+	axs[1].set_ylim(0, None)
+	axs[2].grid()
+	axs[2].set_ylabel("Thresholds (MeV)")
+	axs[2].set_ylim(0, INCIDENT_ENERGY)
+	axs[2].set_xlabel("Signal sensitivity")
+	axs[2].set_xlim(None, 1)
+	fig.tight_layout()
+	plt.savefig("figures/pareto-parameters.pdf")
+
+
 def plot_responses(detector: Detector):
 	""" plot the response of a given detector design to all three kinds of radiation """
 	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*detector.width, x_limit=(detector.width + detector.separation)/2)
@@ -168,8 +226,7 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 
 
 def calculate_signal_sensitivity(
-		material: str, width: float, depth: float,
-		relative_lower_threshold: float, relative_upper_threshold: float
+		material: str, width: float, depth: float, relative_lower_threshold: float, relative_upper_threshold: float
 ) -> float:
 	"""
 	the detection efficiency of this detector assuming the beam is shaped to the detector
@@ -255,63 +312,7 @@ def test_csda_deposition():
 
 
 if __name__ == "__main__":
-	materials = ["EJ-276", "EJ-100", "LaBr3", "silicon"]
-	styles = {"EJ-276": "C2.-", "EJ-100": "C2--", "LaBr3": "C0-", "silicon": "C1:"}
-
-	fronts = {}
-	for material in materials:
-		fronts[material] = {}
-		for pulse_shape_discrimination in [False, True]:
-			fronts[material][pulse_shape_discrimination] = array(find_pareto_front(
-				material, pulse_shape_discrimination))
-			if not pulse_shape_discrimination:
-				i = len(fronts[material][pulse_shape_discrimination])//2
-				width, depth, lower_threshold, upper_threshold, _, _ = fronts[material][pulse_shape_discrimination][i, :]
-				plot_responses(Detector(material, width, depth, lower_threshold=lower_threshold, upper_threshold=upper_threshold))
-
-	fronts["silicon"][True] = fronts["silicon"][False]  # silicon detectors can't have PSD
-
-	# plot the pareto fronts of performance
-	plt.figure()
-	for material in materials:
-		plt.errorbar(
-			x=concatenate([[0], fronts[material][False][:, 4]]),
-			y=concatenate([[0], fronts[material][False][:, 5]]),
-			xerr=stack([
-				concatenate([[0], fronts[material][True][:, 4] - fronts[material][False][:, 4]]),
-				zeros(len(fronts[material][False]) + 1)],
-				axis=0,
-			),
-			fmt=styles[material], label=material)
-	plt.grid()
-	plt.xlim(0, 1000)
-	plt.ylim(0, 1)
-	plt.xlabel("Background sensitivity (counts per signal electron)")
-	plt.ylabel("Signal sensitivity")
-	plt.legend()
-	plt.tight_layout()
-	plt.savefig("figures/pareto.pdf")
-
-	# plot the actual design variables
-	fig, axs = plt.subplots(3, 1, sharex=True, gridspec_kw=dict(hspace=0))
-	for material in materials:
-		axs[0].plot(fronts[material][False][:, 5], fronts[material][False][:, 0], styles[material], label=material)
-		axs[1].plot(fronts[material][False][:, 5], fronts[material][False][:, 1], styles[material])
-		axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 2], styles[material])
-		axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 3], styles[material])
-	axs[0].legend()
-	axs[0].grid()
-	axs[0].set_ylabel("Width (cm)")
-	axs[0].set_ylim(0, None)
-	axs[1].grid()
-	axs[1].set_ylabel("Depth (cm)")
-	axs[1].set_ylim(0, None)
-	axs[2].grid()
-	axs[2].set_ylabel("Thresholds (MeV)")
-	axs[2].set_ylim(0, INCIDENT_ENERGY)
-	axs[2].set_xlabel("Signal sensitivity")
-	axs[2].set_xlim(None, 1)
-	fig.tight_layout()
-	plt.savefig("figures/pareto-parameters.pdf")
-
+	plot_pareto_fronts(
+		["EJ-276", "EJ-100", "LaBr3", "silicon"],
+		{"EJ-276": "C2.-", "EJ-100": "C2--", "LaBr3": "C0-", "silicon": "C1:"})
 	plt.show()
