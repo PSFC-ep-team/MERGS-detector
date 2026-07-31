@@ -17,6 +17,7 @@ logging.basicConfig(
 logging.getLogger().addHandler(logging.StreamHandler())
 
 
+LENGTH = 10  # cm
 INCIDENT_ENERGY = 16.7
 MONOENERGETIC_SPECTRUM = Spectrum("16.5–16.9", array([INCIDENT_ENERGY - 0.2, INCIDENT_ENERGY + 0.2]), array([1., 1.]))
 BACKGROUND_ENERGIES = linspace(0.5, 14, 21)
@@ -34,7 +35,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 			if not pulse_shape_discrimination:
 				i = len(fronts[material][pulse_shape_discrimination])//2
 				width, depth, lower_threshold, upper_threshold, _, _ = fronts[material][pulse_shape_discrimination][i, :]
-				plot_responses(Detector(material, width, depth, lower_threshold=lower_threshold, upper_threshold=upper_threshold))
+				plot_responses(Detector(material, width, depth, LENGTH, lower_threshold=lower_threshold, upper_threshold=upper_threshold))
 
 	fronts["silicon"][True] = fronts["silicon"][False]  # silicon detectors can't have PSD
 
@@ -235,10 +236,10 @@ def calculate_signal_sensitivity(
 	depth = max(0.001, depth)
 	expected_energy = csda_deposition(material, INCIDENT_ENERGY, depth)
 	detector = Detector(
-		material=material, width=width, depth=depth,
+		material=material, width=width, depth=depth, length=LENGTH,
 		lower_threshold=expected_energy + relative_lower_threshold,
 		upper_threshold=expected_energy + relative_upper_threshold)
-	beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*width, x_limit=(width + detector.separation)/2)
+	beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=min(2*width, LENGTH), x_limit=(width + detector.separation)/2)
 	signal_sensitivity, _ = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True)
 	return signal_sensitivity
 
@@ -254,10 +255,10 @@ def calculate_background_sensitivity(
 	depth = max(0.001, depth)
 	expected_energy = csda_deposition(material, INCIDENT_ENERGY, depth)
 	detector = Detector(
-		material=material, width=width, depth=depth,
+		material=material, width=width, depth=depth, length=LENGTH,
 		lower_threshold=expected_energy + relative_lower_threshold,
 		upper_threshold=expected_energy + relative_upper_threshold)
-	world_radius = sqrt(width**2 + depth**2 + detector.length**2)/2
+	world_radius = sqrt((3*width)**2 + depth**2 + detector.length**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
 	photon_beam = Beam("photon", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
 	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*width, x_limit=(width + detector.separation)/2)

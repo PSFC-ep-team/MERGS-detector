@@ -44,6 +44,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 
 	# do the simulation
 	energy_deposited_directly, energy_deposited_indirectly = calculate_response(detector, beam, num_particles)
+	num_particles = energy_deposited_directly.size
 
 	# calculate the sensitivity to signal
 	num_detected = count_nonzero(
@@ -100,7 +101,7 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> t
 
 
 class Detector:
-	def __init__(self, material: str, width: float, depth: float, length=10.0, separation=0.01, lower_threshold=0., upper_threshold=inf):
+	def __init__(self, material: str, width: float, depth: float, length=10.0, separation=0, lower_threshold=0., upper_threshold=inf):
 		"""
 		a single channel of an electron detector
 		:param material: the name of the detection material

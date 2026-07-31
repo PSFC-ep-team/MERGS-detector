@@ -33,27 +33,6 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	structure = xml.SubElement(input_deck, "structure")
 	setup = xml.SubElement(input_deck, "setup", name="Default", version="1.0")
 
-	# check the ambient flag.  if so, we need to use an "omnidirectional" beam.
-	if beam.ambient:
-		xml.SubElement(definitions, "quantity",
-		               name="WorldRadius", type="coordinate", value=f"{beam.distance}", unit="cm")
-		source_position = "0"
-		source_code = "-3"
-	else:
-		source_position = f"{-beam.distance}"
-		source_code = f"{beam.diameter/2}"
-
-	# check if there are multiple energies.  if so, we need to use `input_spectrum.txt`.
-	if type(beam.energy) is Spectrum:
-		savetxt("run/input_spectrum.txt", stack([beam.energy.energies, beam.energy.probabilities], axis=1))
-		energy_code = "-2"
-	else:
-		try:
-			os.remove("run/input_spectrum.txt")
-		except FileNotFoundError:
-			pass
-		energy_code = f"{beam.energy}"
-
 	# check if we're applying an x-limit to the bean.  if so, we need to augment the number of simulated particles.
 	if beam.x_limit < beam.diameter/2:
 		x_twiddle = beam.x_limit/(beam.diameter/2)
@@ -103,25 +82,42 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	xml.SubElement(definitions, "constant", name="SaveEdepositedTotalEntry", value="0")
 	# specify the bean
 	xml.SubElement(definitions, "constant", name="RandomGenSeed", value="0")
+	xml.SubElement(definitions, "constant", name="EventsToRun", value=f"{num_particles}")
+	xml.SubElement(definitions, "constant", name="ParticleNumber", value=f"{beam.number}")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamOffsetX", type="coordinate", value="0", unit="cm")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamOffsetY", type="coordinate", value="0", unit="cm")
-	xml.SubElement(definitions, "quantity",
-	               name="BeamOffsetZ", type="coordinate", value=source_position, unit="cm")
-	xml.SubElement(definitions, "quantity",
-	               name="BeamSize", type="coordinate", value=source_code, unit="cm")
-	xml.SubElement(definitions, "quantity",
-	               name="BeamEnergy", type="energy", value=energy_code, unit="MeV")
-	xml.SubElement(definitions, "constant", name="EventsToRun", value=f"{num_particles}")
-	xml.SubElement(definitions, "constant", name="ParticleNumber", value=f"{beam.number}")
+	if beam.ambient:
+		xml.SubElement(definitions, "quantity",
+		               name="WorldRadius", type="coordinate", value=f"{beam.distance}", unit="cm")
+		xml.SubElement(definitions, "quantity",
+		               name="BeamOffsetZ", type="coordinate", value="0", unit="cm")
+		xml.SubElement(definitions, "quantity",
+		               name="BeamSize", type="coordinate", value="-3", unit="mm")
+	else:
+		xml.SubElement(definitions, "quantity",
+		               name="BeamOffsetZ", type="coordinate", value=f"{-beam.distance}", unit="cm")
+		xml.SubElement(definitions, "quantity",
+		               name="BeamSize", type="coordinate", value=f"{beam.diameter/2}", unit="cm")
+	if type(beam.energy) is Spectrum:
+		savetxt("run/input_spectrum.txt", stack([beam.energy.energies, beam.energy.probabilities], axis=1))
+		xml.SubElement(definitions, "quantity",
+		               name="BeamEnergy", type="energy", value="-1", unit="MeV")
+	else:
+		try:
+			os.remove("run/input_spectrum.txt")
+		except FileNotFoundError:
+			pass
+		xml.SubElement(definitions, "quantity",
+		               name="BeamEnergy", type="energy", value=f"{beam.energy}", unit="MeV")
 
 	# specify the geometry
 	for i, solid in enumerate(solids):
 		xml.SubElement(solid_group, solid.kind, name=f"solid{i}",
 		               lunit="cm", **{key: f"{value}" for key, value in solid.kwargs.items()})
 	xml.SubElement(solid_group, "box", name="infinite_void",
-	               x="300", y="300", z="300", lunit="cm")
+	               x="20", y="20", z="20", lunit="cm")
 
 	# fill in the remaining information
 	for i, solid in enumerate(solids):
@@ -177,11 +173,11 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 		num_particles_recorded = len(unique(output_data["EventID"]))
 		if num_particles_recorded/num_particles < 0.99:
 			raise ValueError(
-				"because of the way grasshopper is, I can't limit the beam unless all of the particles are incident on "
-				"more or less the same solid material (because any geometric correlations will cause me to incorrectly "
-				"estimate how many particles were simulated in the specified beam limits that we _didn't_ see).  "
-				"however, the fact that {1 - num_particles_recorded/num_particles:.1%} of the particles did not "
-				"interact with any matter leads me to suspect that some of them are missing the detector entirely.")
+				f"because of the way grasshopper is, I can't limit the beam unless all of the particles are incident on "
+				f"more or less the same solid material (because any geometric correlations will cause me to incorrectly "
+				f"estimate how many particles were simulated in the specified beam limits that we _didn't_ see).  "
+				f"however, the fact that {1 - num_particles_recorded/num_particles:.1%} of the particles did not "
+				f"interact with any matter leads me to suspect that some of them are missing the detector entirely.")
 		valid = abs(output_data["x_incident"]) <= beam.x_limit
 		output_data = output_data[valid]
 		num_particles_recorded_in_bounds = len(output_data)
