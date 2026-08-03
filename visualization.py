@@ -26,6 +26,7 @@ def plot_moliere_radius(material: str, beam: Beam, num_particles=10000) -> float
 	# area = diff(pi*radius_bins**2)
 	# deposition_density = deposition/area
 
+	os.makedirs("figures", exist_ok=True)
 	plt.figure()
 	plt.stairs(edges=radius_bins, values=deposition)
 	plt.axvline(moliere_radius, linestyle="dashed", color="k")

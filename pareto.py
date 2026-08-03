@@ -26,6 +26,8 @@ BACKGROUND_FLUENCE = 1e3  # neutron/cm²/electron
 
 
 def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
+	os.makedirs("figures", exist_ok=True)
+
 	fronts = {}
 	for material in materials:
 		fronts[material] = {}
