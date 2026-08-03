@@ -20,8 +20,7 @@ energy_bins = linspace(0.03, 2.58, 52)
 tracks, num_particles = simulate(
 	"EJ-276",
 	[
-		Solid("box", x=1.0, y=10.0, z=0.8, z_position=0.4),
-		Solid("box", x=0.8, y=10.0, z=0.5, z_position=-0.25),
+		Solid("box", x=1.0, y=10.0, z=1.8, z_position=0.4),
 	],
 	Beam("electron", 2.5, diameter=0.01),
 	num_particles=10000, debug_mode=True,
@@ -41,9 +40,9 @@ print(f"{counts.max()/(tracks["EventID"].max() + 1):.1%} of the electrons are fu
 tracks, num_particles = simulate(
 	"EJ-276",
 	[
-		Solid("box", x=0.5, y=10.0, z=0.8, x_position=-0.5),
-		Solid("box", x=0.5, y=10.0, z=0.8, x_position=0.0),
-		Solid("box", x=0.5, y=10.0, z=0.8, x_position=0.5),
+		Solid("box", x=0.8, y=10.0, z=1.0, x_position=-0.8),
+		Solid("box", x=0.8, y=10.0, z=1.0, x_position=0.0),
+		Solid("box", x=0.8, y=10.0, z=1.0, x_position=0.8),
 	],
 	Beam("electron", 2.5, diameter=0.01),
 	num_particles=10000, debug_mode=True,
@@ -63,9 +62,9 @@ plt.savefig("figures/experiment_block_crosstalk.pdf")
 tracks, num_particles = simulate(
 	"EJ-276",
 	[
-		Solid("box", x=0.8, y=10.0, z=0.5, z_position=-0.5),
-		Solid("box", x=0.8, y=10.0, z=0.5, z_position=0.0),
-		Solid("box", x=0.8, y=10.0, z=0.5, z_position=0.5),
+		Solid("box", x=1.0, y=10.0, z=0.8, z_position=-0.8),
+		Solid("box", x=1.0, y=10.0, z=0.8, z_position=0.0),
+		Solid("box", x=1.0, y=10.0, z=0.8, z_position=0.8),
 	],
 	Beam("electron", 2.5, diameter=0.01),
 	num_particles=10000, debug_mode=True,
@@ -81,15 +80,16 @@ plt.title("Stacked EJ-276s")
 plt.tight_layout()
 plt.savefig("figures/experiment_block_stopping.pdf")
 
-# fibers to stop whole beam and look at cross-talk
+# fibers to stop whole beam
 solids = []
-for i in range(15):
+for i in range(16):
+	for j in range(10):
+		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, z_position=0.1*i - 0.7, x_position=0.1*j - 0.455, material="EJ-100"))  # fiber
+for i in range(16):
 	for j in range(11):
-		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, x_position=0.1*i - 0.7, z_position=0.1*j - 0.5, material="EJ-100"))  # fiber
-for i in range(15):
-	for j in range(12):
-		solids.append(Solid("box", x=0.094, y=10.0, z=0.003 if j == 0 or j == 11 else 0.006, x_position=0.1*i - 0.7, z_position=0.1*j - 0.55, material="PMMA"))  # top cladding
-	solids.append(Solid("box", x=0.003 if i == 0 else 0.006, y=10.0, z=1.1, x_position=0.1*i - 0.75, z_position=0, material="PMMA"))  # side cladding
+		solids.append(Solid("box", x=0.003 if j == 0 or j == 10 else 0.006, y=10.0, z=0.094, x_position=0.1*j - 0.505, z_position=0.1*i - 0.7, material="PMMA"))  # side cladding
+for i in range(17):
+	solids.append(Solid("box", x=1.0, y=10.0, z=0.003 if i == 0 or i == 16 else 0.006, x_position=-0.005, z_position=0.1*i - 0.75, material="PMMA"))  # top cladding
 tracks, num_particles = simulate(
 	"EJ-100",
 	solids,
@@ -97,7 +97,34 @@ tracks, num_particles = simulate(
 	num_particles=10000, debug_mode=True,
 )
 plt.figure()
-for detector_group in [(0, 50), (50, 100), (100, 150)]:
+response = histogram(tracks["EventID"], weights=tracks["E_depositedMeV"], bins=arange(-1/2, num_particles))[0]
+counts, _, _ = plt.hist(response, bins=energy_bins)
+plt.xlim(0, energy_bins[-1])
+plt.ylim(0, min(counts.max()*1.05, partition(counts, -2)[-2]*1.5))
+plt.xlabel("Energy deposited (MeV)")
+plt.title("Large fiber block")
+plt.tight_layout()
+plt.savefig("figures/experiment_triple_fiber.pdf")
+print(f"{counts.max()/(tracks["EventID"].max() + 1):.1%} of the electrons are fully stopped")
+
+# fibers to stop whole beam and look at cross-talk
+solids = []
+for i in range(24):
+	for j in range(10):
+		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, x_position=0.1*i - 1.155, z_position=0.1*j - 0.45, material="EJ-100"))  # fiber
+for i in range(24):
+	for j in range(11):
+		solids.append(Solid("box", x=0.094, y=10.0, z=0.003 if j == 0 or j == 10 else 0.006, x_position=0.1*i - 1.155, z_position=0.1*j - 0.5, material="PMMA"))  # top cladding
+for i in range(25):
+	solids.append(Solid("box", x=0.003 if i == 0 or i == 24 else 0.006, y=10.0, z=1.0, x_position=0.1*i - 1.205, z_position=0, material="PMMA"))  # side cladding
+tracks, num_particles = simulate(
+	"EJ-100",
+	solids,
+	Beam("electron", 2.5, diameter=0.01),
+	num_particles=10000, debug_mode=True,
+)
+plt.figure()
+for detector_group in [(0, 80), (80, 160), (160, 240)]:
 	here = (tracks["detector"] >= detector_group[0]) & (tracks["detector"] < detector_group[1])
 	response = histogram(tracks[here]["EventID"], weights=tracks[here]["E_depositedMeV"], bins=arange(-1/2, num_particles))[0]
 	plt.hist(response, bins=energy_bins)
@@ -109,13 +136,14 @@ plt.savefig("figures/experiment_fiber_crosstalk.pdf")
 
 # fibers to stop whole beam and look at stopping
 solids = []
-for i in range(15):
+for i in range(24):
+	for j in range(10):
+		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, z_position=0.1*i - 0.7, x_position=0.1*j - 0.455, material="EJ-100"))  # fiber
+for i in range(24):
 	for j in range(11):
-		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, z_position=0.1*i - 0.7, x_position=0.1*j - 0.5, material="EJ-100"))  # fiber
-for i in range(15):
-	for j in range(12):
-		solids.append(Solid("box", x=0.003 if j == 0 or j == 11 else 0.006, y=10.0, z=0.094, x_position=0.1*j - 0.55, z_position=0.1*i - 0.7, material="PMMA"))  # side cladding
-	solids.append(Solid("box", x=1.1, y=10.0, z=0.003 if i == 0 else 0.006, x_position=0, z_position=0.1*i - 0.75, material="PMMA"))  # top cladding
+		solids.append(Solid("box", x=0.003 if j == 0 or j == 10 else 0.006, y=10.0, z=0.094, x_position=0.1*j - 0.505, z_position=0.1*i - 0.7, material="PMMA"))  # side cladding
+for i in range(25):
+	solids.append(Solid("box", x=1.0, y=10.0, z=0.003 if i == 0 or i == 24 else 0.006, x_position=-0.005, z_position=0.1*i - 0.75, material="PMMA"))  # top cladding
 tracks, num_particles = simulate(
 	"EJ-100",
 	solids,
@@ -123,7 +151,7 @@ tracks, num_particles = simulate(
 	num_particles=10000, debug_mode=True,
 )
 plt.figure()
-for detector_group in [(0, 50), (50, 100), (100, 150)]:
+for detector_group in [(0, 80), (80, 160), (160, 240)]:
 	here = (tracks["detector"] >= detector_group[0]) & (tracks["detector"] < detector_group[1])
 	response = histogram(tracks[here]["EventID"], weights=tracks[here]["E_depositedMeV"], bins=arange(-1/2, num_particles))[0]
 	plt.hist(response, bins=energy_bins)
