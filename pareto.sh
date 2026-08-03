@@ -3,6 +3,7 @@
 #SBATCH --ntasks=1
 #SBATCH --time=11:59:00
 #SBATCH --partition=mit_normal
+#SBATCH --mem-per-cpu=8000
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=kunimune@mit.edu
 
@@ -12,8 +13,19 @@ conda activate geant_env
 
 cd $HOME/MERGS-detector
 
-timeout 11.9h python -u pareto.py
-if [ $? -eq 123 ]; then
-	sbatch pareto.sh
-fi
+EXIT_CODE=124
 
+for i in $(seq 1 23); do
+	timeout 0.5h python -u pareto.py
+	EXIT_CODE=$?
+	if [ $EXIT_CODE -eq 124 ]; then
+		echo "Killing and restarting to clear memory."
+	else
+		echo "Python terminated with exit code $EXIT_CODE"
+		exit $EXIT_CODE
+	fi
+done
+
+echo "Our time is up but there's more work to do.  Recuing..."
+sbatch pareto.sh
+exit 0
