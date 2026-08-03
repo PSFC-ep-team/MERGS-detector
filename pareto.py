@@ -86,21 +86,24 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 def plot_responses(detector: Detector):
 	""" plot the response of a given detector design to all three kinds of radiation """
 	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*detector.width, x_limit=(detector.width + detector.separation)/2)
-	electron_response = calculate_response(detector, electron_beam, num_particles=100_000)
+	electron_response, crosstalk_response = calculate_response(detector, electron_beam, num_particles=100_000)
 	electron_weight = 1/100_000
 	world_radius = sqrt(detector.width**2 + detector.depth**2 + detector.length**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
-	neutron_response = calculate_response(detector, neutron_beam, num_particles=1_000_000)
+	neutron_response, _ = calculate_response(detector, neutron_beam, num_particles=1_000_000)
 	neutron_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/1_000_000
 	photon_beam = Beam("photon", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
-	photon_response = calculate_response(detector, photon_beam, num_particles=1_000_000)
+	photon_response, _ = calculate_response(detector, photon_beam, num_particles=1_000_000)
 	photon_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/1_000_000
 
 	energy_bins = linspace(0.05, 17.05, 86)
 	plt.figure()
 	plt.hist(
 		electron_response, energy_bins, weights=full(electron_response.shape, electron_weight),
-		color="tab:orange", alpha=0.5, label="Electrons")
+		color="tab:gray", alpha=0.5, label="Signal")
+	plt.hist(
+		electron_response, energy_bins, weights=full(electron_response.shape, electron_weight),
+		color="tab:orange", alpha=0.5, label="Cross-talk")
 	plt.hist(
 		photon_response, energy_bins, weights=full(photon_response.shape, photon_weight),
 		color="tab:green", alpha=0.5, label="Photons")
