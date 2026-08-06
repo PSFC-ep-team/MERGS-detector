@@ -16,14 +16,14 @@ os.makedirs("figures", exist_ok=True)
 
 energy_bins = linspace(0.03, 2.58, 52)
 
-CHANNEL_DEPTH = 0.7
-CHANNEL_WIDTH = 0.7
+CHANNEL_DEPTH = 1.0
+CHANNEL_WIDTH = 1.0
 
 # combined EJ276 to stop whole beam
 entries, num_particles = simulate(
 	"EJ-276",
 	[
-		Solid("box", x=CHANNEL_DEPTH, y=10.0, z=3*CHANNEL_WIDTH),
+		Solid("box", x=CHANNEL_DEPTH, y=10.0, z=2*CHANNEL_WIDTH),
 	],
 	Beam("electron", 2.5, diameter=0.01),
 	num_particles=10000, debug_mode=True,
@@ -42,7 +42,6 @@ print(f"{counts.max()/num_particles:.1%} of the electrons are fully stopped")
 entries, _ = simulate(
 	"EJ-276",
 	[
-		Solid("box", x=CHANNEL_WIDTH, y=10.0, z=CHANNEL_DEPTH, x_position=-CHANNEL_WIDTH),
 		Solid("box", x=CHANNEL_WIDTH, y=10.0, z=CHANNEL_DEPTH, x_position=0.0),
 		Solid("box", x=CHANNEL_WIDTH, y=10.0, z=CHANNEL_DEPTH, x_position=CHANNEL_WIDTH),
 	],
@@ -63,7 +62,6 @@ plt.savefig("figures/experiment_block_crosstalk.pdf")
 entries, _ = simulate(
 	"EJ-276",
 	[
-		Solid("box", x=CHANNEL_DEPTH, y=10.0, z=CHANNEL_WIDTH, z_position=-CHANNEL_WIDTH),
 		Solid("box", x=CHANNEL_DEPTH, y=10.0, z=CHANNEL_WIDTH, z_position=0.0),
 		Solid("box", x=CHANNEL_DEPTH, y=10.0, z=CHANNEL_WIDTH, z_position=CHANNEL_WIDTH),
 	],
@@ -85,14 +83,14 @@ n_width = round(10*CHANNEL_WIDTH)
 n_depth = round(10*CHANNEL_DEPTH)
 Δx = -0.005
 solids = []
-for i in range(3*n_width):
+for i in range(2*n_width):
 	for j in range(n_depth):
-		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, z_position=0.1*(i + 1/2 - 3*n_width/2), x_position=0.1*(j + 1/2 - n_depth/2) + Δx, material="EJ-100"))  # fiber
-for i in range(3*n_width):
+		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, z_position=0.1*(i + 1/2 - n_width/2), x_position=0.1*(j + 1/2 - n_depth/2) + Δx, material="EJ-100"))  # fiber
+for i in range(2*n_width):
 	for j in range(n_depth + 1):
-		solids.append(Solid("box", x=0.003 if j == 0 or j == n_depth else 0.006, y=10.0, z=0.094, x_position=0.1*(j - n_depth/2) + Δx, z_position=0.1*(i + 1/2 - 3*n_width/2), material="PMMA"))  # side cladding
-for i in range(3*n_width + 1):
-	solids.append(Solid("box", x=0.1*n_depth, y=10.0, z=0.003 if i == 0 or i == 3*n_width else 0.006, x_position=Δx, z_position=0.1*(i - 3*n_width/2), material="PMMA"))  # top cladding
+		solids.append(Solid("box", x=0.003 if j == 0 or j == n_depth else 0.006, y=10.0, z=0.094, x_position=0.1*(j - n_depth/2) + Δx, z_position=0.1*(i + 1/2 - n_width/2), material="PMMA"))  # side cladding
+for i in range(2*n_width + 1):
+	solids.append(Solid("box", x=0.1*n_depth, y=10.0, z=0.003 if i == 0 or i == 2*n_width else 0.006, x_position=Δx, z_position=0.1*(i - n_width/2), material="PMMA"))  # top cladding
 entries, num_particles = simulate(
 	"EJ-100",
 	solids,
@@ -112,14 +110,14 @@ print(f"{counts.max()/num_particles:.1%} of the electrons are fully stopped")
 
 # fibers to look at cross-talk
 solids = []
-for i in range(3*n_width):
+for i in range(2*n_width):
 	for j in range(n_depth):
-		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, x_position=0.1*(i + 1/2 - 3*n_width/2) + Δx, z_position=0.1*(j + 1/2 - n_depth/2), material="EJ-100"))  # fiber
-for i in range(3*n_width):
+		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, x_position=0.1*(i + 1/2 - n_width/2) + Δx, z_position=0.1*(j + 1/2 - n_depth/2), material="EJ-100"))  # fiber
+for i in range(2*n_width):
 	for j in range(n_depth + 1):
-		solids.append(Solid("box", x=0.094, y=10.0, z=0.003 if j == 0 or j == n_depth else 0.006, x_position=0.1*(i + 1/2 - 3*n_width/2) + Δx, z_position=0.1*(j - n_depth/2), material="PMMA"))  # top cladding
-for i in range(3*n_width + 1):
-	solids.append(Solid("box", x=0.003 if i == 0 or i == 3*n_width else 0.006, y=10.0, z=0.1*n_depth, x_position=0.1*(i - 3*n_width/2) + Δx, z_position=0, material="PMMA"))  # side cladding
+		solids.append(Solid("box", x=0.094, y=10.0, z=0.003 if j == 0 or j == n_depth else 0.006, x_position=0.1*(i + 1/2 - n_width/2) + Δx, z_position=0.1*(j - n_depth/2), material="PMMA"))  # top cladding
+for i in range(2*n_width + 1):
+	solids.append(Solid("box", x=0.003 if i == 0 or i == 2*n_width else 0.006, y=10.0, z=0.1*n_depth, x_position=0.1*(i - n_width/2) + Δx, z_position=0, material="PMMA"))  # side cladding
 entries, _ = simulate(
 	"EJ-100",
 	solids,
@@ -127,7 +125,7 @@ entries, _ = simulate(
 	num_particles=10000, debug_mode=True,
 )
 plt.figure()
-for detector_group in [(0, n_width*n_depth), (n_width*n_depth, 2*n_width*n_depth), (2*n_width*n_depth, 3*n_width*n_depth)]:
+for detector_group in [(0, n_width*n_depth), (n_width*n_depth, 2*n_width*n_depth)]:
 	here = (entries["detector"] >= detector_group[0]) & (entries["detector"] < detector_group[1])
 	response = histogram(entries[here]["EventID"], weights=entries[here]["E_depositedMeV"], bins=arange(-1/2, num_particles))[0]
 	plt.hist(response, bins=energy_bins)
@@ -139,14 +137,14 @@ plt.savefig("figures/experiment_fiber_crosstalk.pdf")
 
 # fibers to look at stopping
 solids = []
-for i in range(3*n_width):
+for i in range(2*n_width):
 	for j in range(n_depth):
-		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, z_position=0.1*(i + 1/2 - 3*n_width/2), x_position=0.1*(j + 1/2 - n_depth/2) + Δx, material="EJ-100"))  # fiber
-for i in range(3*n_width):
+		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, z_position=0.1*(i + 1/2 - n_width/2), x_position=0.1*(j + 1/2 - n_depth/2) + Δx, material="EJ-100"))  # fiber
+for i in range(2*n_width):
 	for j in range(n_depth + 1):
-		solids.append(Solid("box", x=0.003 if j == 0 or j == n_depth else 0.006, y=10.0, z=0.094, x_position=0.1*(j - n_depth/2) + Δx, z_position=0.1*(i + 1/2 - 3*n_width/2), material="PMMA"))  # side cladding
-for i in range(3*n_width + 1):
-	solids.append(Solid("box", x=0.1*n_depth, y=10.0, z=0.003 if i == 0 or i == 3*n_width else 0.006, x_position=Δx, z_position=0.1*(i - 3*n_width/2), material="PMMA"))  # top cladding
+		solids.append(Solid("box", x=0.003 if j == 0 or j == n_depth else 0.006, y=10.0, z=0.094, x_position=0.1*(j - n_depth/2) + Δx, z_position=0.1*(i + 1/2 - n_width/2), material="PMMA"))  # side cladding
+for i in range(2*n_width + 1):
+	solids.append(Solid("box", x=0.1*n_depth, y=10.0, z=0.003 if i == 0 or i == 2*n_width else 0.006, x_position=Δx, z_position=0.1*(i - n_width/2), material="PMMA"))  # top cladding
 entries, _ = simulate(
 	"EJ-100",
 	solids,
@@ -154,7 +152,7 @@ entries, _ = simulate(
 	num_particles=10000, debug_mode=True,
 )
 plt.figure()
-for detector_group in [(0, n_width*n_depth), (n_width*n_depth, 2*n_width*n_depth), (2*n_width*n_depth, 3*n_width*n_depth)]:
+for detector_group in [(0, n_width*n_depth), (n_width*n_depth, 2*n_width*n_depth)]:
 	here = (entries["detector"] >= detector_group[0]) & (entries["detector"] < detector_group[1])
 	response = histogram(entries[here]["EventID"], weights=entries[here]["E_depositedMeV"], bins=arange(-1/2, num_particles))[0]
 	plt.hist(response, bins=energy_bins)
