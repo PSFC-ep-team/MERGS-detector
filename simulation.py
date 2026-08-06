@@ -7,7 +7,7 @@ import subprocess
 import xml.etree.ElementTree as xml
 
 from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero, diff, \
-	sqrt, arcsin, pi, unique, inf
+	sqrt, arcsin, pi, unique, inf, nonzero
 from numpy.typing import NDArray
 from scipy import integrate
 
@@ -167,6 +167,16 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	output_data["x_incident"] /= 10
 	output_data["y_incident"] /= 10
 	output_data["z_incident"] /= 10
+
+	# the VRML file adds a bunch of additional particles for some reason so please remove those now
+	if debug_mode:
+		breakpoints = nonzero(diff(output_data["EventID"]) < 0)[0] + 1
+		if breakpoints.size > 1:
+			raise ValueError("the event IDs are all messed up; I only expected to find one place where they regress.")
+		elif breakpoints.size == 0:
+			pass  # it's possible that enuff tracks will be missing that we don't see this, and that's fine
+		else:
+			output_data = output_data[breakpoints[0]:]
 
 	# filter out phony particles if we wanted a non-circular beam
 	if beam.x_limit < beam.diameter/2:
