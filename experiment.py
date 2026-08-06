@@ -141,7 +141,7 @@ plt.savefig("figures/experiment_fiber_crosstalk.pdf")
 solids = []
 for i in range(3*n_width):
 	for j in range(n_depth):
-		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, z_position=0.1*(i + 1/2 - 2*n_width), x_position=0.1*(j - 1/2 - n_depth/2) + Δx, material="EJ-100"))  # fiber
+		solids.append(Solid("box", x=0.094, y=10.0, z=0.094, z_position=0.1*(i + 1/2 - 3*n_width/2), x_position=0.1*(j + 1/2 - n_depth/2) + Δx, material="EJ-100"))  # fiber
 for i in range(3*n_width):
 	for j in range(n_depth + 1):
 		solids.append(Solid("box", x=0.003 if j == 0 or j == n_depth else 0.006, y=10.0, z=0.094, x_position=0.1*(j - n_depth/2) + Δx, z_position=0.1*(i + 1/2 - 3*n_width/2), material="PMMA"))  # side cladding
