@@ -9,7 +9,9 @@ The main ones are as follows:
 * `pareto.py` will optimize a bunch of detectors for 16.7 MeV electrons and plot the pareto front of best detectors.
 * `simulation.py` is not meant to be run on its own, but rather contains the underlying Python–Grasshopper interface.
 
-None of them do anything fancy with the command line so you can just run them as Python scripts.  For example:
+## Usage
+
+None of the scripts do anything fancy with the command line so you can just run them as Python scripts.  For example:
 ```bash
 python experiment.py
 ```
@@ -26,11 +28,14 @@ A few directories are automaticly generated sometimes.  Specificly:
 * `results/` is where caches and calculated pareto fronts go.
 * `run/` is where grasshopper is actually run, so that's where you'll find its raw outputs and any WRL files.
 
+## Dependencies
+
+The only dependency is Grasshopper.
+Install my special version from [github.com/jkunimune/grasshopper](https://github.com/jkunimune/grasshopper), build and install it, and put the `grasshopper` executable on your path.
+
 ## Installation
 
-I mean there's no installation needed but if you're installing Grasshopper the instructions on GitHub are really not sufficient.
-For example, following them verbatim throws the error that you're missing "FindGeant4.cmake", and I don't even know what that is.
-So here's a quick guide for installing Grasshopper:
+I mean there's no installation needed for this repo but here is some advice for installing Grasshopper.
 
 ### Using CMake (I hate software developers)
 First of all, if you haven't used CMake, you need to use it thrice here, and I hate it because it's terrible so I'm just going to summarize CMake here.

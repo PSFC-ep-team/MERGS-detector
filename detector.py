@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
-from numpy import count_nonzero, inf, histogram, arange, array, isclose
+from numpy import count_nonzero, inf, histogram, array, isclose, sqrt, concatenate
 from numpy.typing import NDArray
 
 from data import MATERIAL_DATA
@@ -43,24 +44,32 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 		simulated_fraction = 1
 
 	# do the simulation
-	energy_deposited_directly, energy_deposited_indirectly = calculate_response(detector, beam, num_particles)
-	num_particles = energy_deposited_directly.size
+	energy_deposited_directly, energy_deposited_indirectly, num_particles = calculate_response(detector, beam, num_particles)
 
 	# calculate the sensitivity to signal
 	num_detected = count_nonzero(
-		(energy_deposited_directly > 0) &
 		(energy_deposited_directly >= detector.lower_threshold) &
 		(energy_deposited_directly <= detector.upper_threshold)
 	)
 	direct_sensitivity = num_detected/(num_particles/simulated_fraction)
+	direct_sensitivity_error = sqrt(num_detected*(num_particles - num_detected)/num_particles)/(num_particles/simulated_fraction)
 
 	# calculate the sensitivity to cross-talk
 	num_detected = count_nonzero(
-		(energy_deposited_indirectly > 0) &
 		(energy_deposited_indirectly >= detector.lower_threshold) &
 		(energy_deposited_indirectly <= detector.upper_threshold)
 	)
 	cross_sensitivity = num_detected/(num_particles/simulated_fraction)
+	cross_sensitivity_error = sqrt(num_detected*(num_particles - num_detected)/num_particles)/(num_particles/simulated_fraction)
+
+	if direct_sensitivity_error/direct_sensitivity > .10 or cross_sensitivity_error/cross_sensitivity > .10:
+		logging.warning(
+			f"when calculating the sensitivity of a {detector.width:.2g}×{detector.depth:.2g} cm "
+			f"{detector.material_name} detector to {beam.energy} {'ambient' if beam.ambient else 'collimated'} "
+			f"{beam.particle_name}s, counting only particles between {detector.lower_threshold:.2g} and "
+			f"{detector.upper_threshold:.2g} MeV, we got an unacceptably uncertain anser of "
+			f"{direct_sensitivity:.3g} ± {direct_sensitivity_error:.3g} direct hits and "
+			f"{cross_sensitivity:.3g} ± {cross_sensitivity_error:.3g} in adjacent detectors.")
 
 	if use_cache:
 		os.makedirs("results", exist_ok=True)
@@ -70,7 +79,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 	return direct_sensitivity, cross_sensitivity
 
 
-def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> tuple[NDArray, NDArray]:
+def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> tuple[NDArray, NDArray, int]:
 	""" run a simulation for this detector and extract the total energy deposition of each particle in both this and adjacent detectors """
 	solids = []
 	# instantiate three adjacent detectors
@@ -82,7 +91,7 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> t
 			solids.append(Solid("box", x_position=x, x=detector.separation, y=detector.length, z=detector.depth, material="aluminum"))
 
 	# run the simulation
-	tracks, num_particles = simulate(
+	entries, num_particles = simulate(
 		detector.material_name,
 		solids,
 		beam,
@@ -91,13 +100,9 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> t
 	# sort particles by detector
 	responses = []
 	for detector_index in range(3):
-		responses.append(histogram(
-			tracks[tracks["detector"] == detector_index]["EventID"],
-			weights=tracks[tracks["detector"] == detector_index]["E_depositedMeV"],
-			bins=arange(-1/2, num_particles),
-		)[0])  # TODO: account for finite photon statistics
+		responses.append(entries[entries["detector"] == detector_index]["E_depositedMeV"])  # TODO: account for finite photon statistics
 
-	return responses[1], responses[0] + responses[2]  # combine the two adjacent detectors when you return
+	return responses[1], concatenate([responses[0], responses[2]]), num_particles  # combine the two adjacent detectors when you return
 
 
 class Detector:
@@ -124,7 +129,7 @@ class Detector:
 
 
 def test_spectral_truncation():
-	detector = Detector("EJ-276", 3.0, 6.0, lower_threshold=18)
+	detector = Detector("EJ-276", 5.0, 10.0, lower_threshold=18)
 	spectrum = Spectrum("uniform", array([10., 20.]), array([1., 1.]))
 	num_particles = 1_000_000
 	pure_sensitivity, _ = calculate_sensitivity(

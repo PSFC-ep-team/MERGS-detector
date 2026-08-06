@@ -14,7 +14,7 @@ from scipy import integrate
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 
-def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles: int, debug_mode=False) -> tuple[NDArray, int]:
+def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles: int, debug_mode=False, full_output=False) -> tuple[NDArray, int]:
 	"""
 	run a Geant4 simulation of a beam of these particles hitting a detector.
 	if the beam has an x_limit, the number of particles you get may not be exactly the number you requested.
@@ -78,8 +78,8 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	               name="ProductionLowLimit", type="threshold", value="1", unit="keV")
 	# specify output filters
 	xml.SubElement(definitions, "constant", name="SaveSurfaceHitTrack", value="0")
-	xml.SubElement(definitions, "constant", name="SaveTrackInfo", value="1")
-	xml.SubElement(definitions, "constant", name="SaveEdepositedTotalEntry", value="0")
+	xml.SubElement(definitions, "constant", name="SaveTrackInfo", value="1" if full_output else "0")
+	xml.SubElement(definitions, "constant", name="SaveEdepositedTotalEntry", value="0" if full_output else "1")
 	# specify the bean
 	xml.SubElement(definitions, "constant", name="RandomGenSeed", value="0")
 	xml.SubElement(definitions, "constant", name="EventsToRun", value=f"{num_particles}")
@@ -275,7 +275,7 @@ def test_simulation():
 	tracks, _ = simulate(
 		"silicon", [simple_box],
 		Beam("proton", uniform_spectrum, diameter=2),
-		num_particles=num_particles)
+		num_particles=num_particles, full_output=True)
 	incident_tracks = tracks[tracks["TrackID"] == 1]
 	assert isclose(incident_tracks.size, num_particles/2, atol=100)
 	assert all(incident_tracks["x_incident"] >= 0)
@@ -291,7 +291,7 @@ def test_beam_limiting():
 	tracks, _ = simulate(
 		"silicon", [simple_box],
 		Beam("proton", energy=14, diameter=2, x_limit=0.5),
-		num_particles=num_particles)
+		num_particles=num_particles, full_output=True)
 	incident_tracks = tracks[tracks["TrackID"] == 1]
 	assert isclose(len(incident_tracks), 10_000, atol=100)
 
