@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 
 from numpy import count_nonzero, inf, histogram, array, isclose, sqrt, concatenate
@@ -12,8 +11,11 @@ from data import MATERIAL_DATA
 from simulation import Beam, simulate, Solid, Spectrum
 
 
-def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, use_cache=False, skip_undetectable_tracks=True) -> tuple[float, float]:
-	""" calculate the fraction of these incident particles that are detected by this detector and by adjacent detectors """
+def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, use_cache=False, skip_undetectable_tracks=True) -> tuple[float, float, float, float]:
+	"""
+	calculate the fraction of these incident particles that are detected by this detector and by adjacent detectors
+	:return: the direct sensitivity, the direct sensitivity uncertainty, the cross-talk sensitivity, and the cross-talk sensitivity uncertainty
+	"""
 	cache_key = (f"{detector.material_name}, {detector.width}, {detector.depth}, "
 	             f"{detector.lower_threshold}, {detector.upper_threshold}, "
 	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.distance}, {'ambient' if beam.ambient else 'collimated'}")
@@ -24,15 +26,15 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 				for line in file.readlines():
 					input_string, output_string = line.split(" -> ")
 					if input_string == cache_key:
-						direct_sensitivity, cross_sensitivity = output_string.split(",")
-						return float(direct_sensitivity), float(cross_sensitivity)
+						results = output_string.split(",")
+						return tuple(float(x) for x in results)
 		except FileNotFoundError:
 			pass
 
 	# truncate the spectrum to save time, since nothing lower than the lower threshold matters
 	if type(beam.energy) is Spectrum:
 		if detector.lower_threshold > beam.energy.energies.max():
-			return 0, 0
+			return 0, 0, 0, 0
 		if skip_undetectable_tracks:
 			truncated_spectrum, simulated_fraction = beam.energy.truncate(detector.lower_threshold)
 			beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.x_limit, beam.distance, beam.ambient)
@@ -40,7 +42,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 			simulated_fraction = 1
 	else:
 		if detector.lower_threshold > beam.energy:
-			return 0, 0
+			return 0, 0, 0, 0
 		simulated_fraction = 1
 
 	# do the simulation
@@ -62,21 +64,12 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 	cross_sensitivity = num_detected/(num_particles/simulated_fraction)
 	cross_sensitivity_error = sqrt(num_detected*(num_particles - num_detected)/num_particles)/(num_particles/simulated_fraction)
 
-	if direct_sensitivity_error/direct_sensitivity > .10 or cross_sensitivity_error/cross_sensitivity > .10:
-		logging.warning(
-			f"when calculating the sensitivity of a {detector.width:.2g}×{detector.depth:.2g} cm "
-			f"{detector.material_name} detector to {beam.energy} {'ambient' if beam.ambient else 'collimated'} "
-			f"{beam.particle_name}s, counting only particles between {detector.lower_threshold:.2g} and "
-			f"{detector.upper_threshold:.2g} MeV, we got an unacceptably uncertain anser of "
-			f"{direct_sensitivity:.3g} ± {direct_sensitivity_error:.3g} direct hits and "
-			f"{cross_sensitivity:.3g} ± {cross_sensitivity_error:.3g} in adjacent detectors.")
-
 	if use_cache:
 		os.makedirs("results", exist_ok=True)
 		with open("results/cache.txt", mode="a") as file:
-			file.write(f"{cache_key} -> {direct_sensitivity}, {cross_sensitivity}\n")
+			file.write(f"{cache_key} -> {direct_sensitivity}, {direct_sensitivity_error}, {cross_sensitivity}, {cross_sensitivity_error}\n")
 
-	return direct_sensitivity, cross_sensitivity
+	return direct_sensitivity, direct_sensitivity_error, cross_sensitivity, cross_sensitivity_error
 
 
 def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> tuple[NDArray, NDArray, int]:
@@ -132,10 +125,10 @@ def test_spectral_truncation():
 	detector = Detector("EJ-276", 5.0, 10.0, lower_threshold=18)
 	spectrum = Spectrum("uniform", array([10., 20.]), array([1., 1.]))
 	num_particles = 1_000_000
-	pure_sensitivity, _ = calculate_sensitivity(
+	pure_sensitivity, _, _, _ = calculate_sensitivity(
 		detector, Beam("electron", spectrum),
 		num_particles=num_particles, skip_undetectable_tracks=False)
-	clever_sensitivity, _ = calculate_sensitivity(
+	clever_sensitivity, _, _, _ = calculate_sensitivity(
 		detector, Beam("electron", spectrum),
 		num_particles=num_particles, skip_undetectable_tracks=True)
 	assert isclose(pure_sensitivity, clever_sensitivity, rtol=0.005)

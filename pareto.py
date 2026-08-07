@@ -10,9 +10,11 @@ from detector import calculate_sensitivity, Detector, calculate_response
 from simulation import Beam, Spectrum
 
 
+plt.rcParams["font.size"] = 12
+
 os.makedirs("results", exist_ok=True)
 logging.basicConfig(
-	level=logging.INFO, filename="results/out.log", encoding="utf-8",
+	level=logging.DEBUG, filename="results/out.log", encoding="utf-8",
 	datefmt="%m-%d %H:%M:%S", format="%(asctime)s %(levelname)-5.5s %(message)s")
 logging.getLogger().addHandler(logging.StreamHandler())
 
@@ -22,7 +24,7 @@ INCIDENT_ENERGY = 16.7
 MONOENERGETIC_SPECTRUM = Spectrum("16.5–16.9", array([INCIDENT_ENERGY - 0.2, INCIDENT_ENERGY + 0.2]), array([1., 1.]))
 BACKGROUND_ENERGIES = linspace(0.5, 14, 21)
 BACKGROUND_SPECTRUM = Spectrum("E⁻²", BACKGROUND_ENERGIES, BACKGROUND_ENERGIES**-2)
-BACKGROUND_FLUENCE = 1e3  # neutron/cm²/electron
+BACKGROUND_FLUENCE = 1e+0  # neutron/cm²/electron
 
 
 def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
@@ -31,15 +33,13 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 	fronts = {}
 	for material in materials:
 		fronts[material] = {}
-		for pulse_shape_discrimination in [False, True]:
-			fronts[material][pulse_shape_discrimination] = array(find_pareto_front(
-				material, pulse_shape_discrimination))
-			if not pulse_shape_discrimination:
-				i = len(fronts[material][pulse_shape_discrimination])//2
-				width, depth, lower_threshold, upper_threshold, _, _ = fronts[material][pulse_shape_discrimination][i, :]
+		for optimistic in [False, True]:
+			fronts[material][optimistic] = array(find_pareto_front(
+				material, optimistic))
+			if not optimistic:
+				i = len(fronts[material][optimistic])//2
+				width, depth, lower_threshold, upper_threshold, _, _ = fronts[material][optimistic][i, :]
 				plot_responses(Detector(material, width, depth, LENGTH, lower_threshold=lower_threshold, upper_threshold=upper_threshold))
-
-	fronts["silicon"][True] = fronts["silicon"][False]  # silicon detectors can't have PSD
 
 	# plot the pareto fronts of performance
 	plt.figure()
@@ -82,7 +82,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 	axs[2].set_xlabel("Signal sensitivity")
 	axs[2].set_xlim(None, 1)
 	fig.tight_layout()
-	plt.savefig("figures/pareto-parameters.pdf")
+	plt.savefig("figures/pareto_parameters.pdf")
 
 
 def plot_responses(detector: Detector):
@@ -100,21 +100,19 @@ def plot_responses(detector: Detector):
 
 	energy_bins = linspace(0.05, 17.05, 86)
 	plt.figure()
-	plt.hist(
-		electron_response, energy_bins, weights=full(electron_response.shape, electron_weight),
-		color="tab:gray", alpha=0.5, label="Signal")
-	plt.hist(
-		electron_response, energy_bins, weights=full(electron_response.shape, electron_weight),
-		color="tab:orange", alpha=0.5, label="Cross-talk")
-	plt.hist(
-		photon_response, energy_bins, weights=full(photon_response.shape, photon_weight),
-		color="tab:green", alpha=0.5, label="Photons")
-	plt.hist(
-		neutron_response, energy_bins, weights=full(neutron_response.shape, neutron_weight),
-		color="tab:gray", alpha=0.5, label="Neutrons")
+	for histogram_type, opacity, attach_label in [("stepfilled", 1/4, False), ("step", 1, True)]:
+		counts, _, _ = plt.hist(
+			[electron_response, crosstalk_response, photon_response, neutron_response],
+			energy_bins,
+			weights=[full(electron_response.size, electron_weight), full(electron_response.size, electron_weight), full(neutron_response.size, neutron_weight), full(photon_response.size, photon_weight)],
+			color=["tab:orange", "tab:red", "tab:green", "tab:gray"],
+			label=["Signal", "Cross-talk", "Photons", "Neutrons"] if attach_label else None,
+			histtype=histogram_type, alpha=opacity,
+		)
 	plt.axvline(detector.lower_threshold, linestyle="--", color="k")
 	plt.axvline(detector.upper_threshold, linestyle="--", color="k")
 	plt.xlim(0, 17)
+	plt.ylim(0, counts[0].max()*1.05)
 	plt.legend()
 	plt.xlabel("Deposited energy (MeV)")
 	plt.title(f"{detector.width:.1f} cm × {detector.depth:.1f} cm {detector.material_name} detector")
@@ -122,34 +120,38 @@ def plot_responses(detector: Detector):
 	plt.savefig(f"figures/{detector.material_name}_response.pdf")
 
 
-def find_pareto_front(material: str, pulse_shape_discrimination: bool) -> list[tuple[float, float, float, float, float]]:
+def find_pareto_front(material: str, optimistic: bool) -> list[tuple[float, float, float, float, float]]:
 	"""
 	find the pareto front of designs with high sensitivity to signal and low sensitivity to background
 	:param material: the material out of which the detector is made
-	:param pulse_shape_discrimination: whether we think there's PSD
+	:param optimistic: whether we assume we can use pulse shape discrimination and coincidence subtraction
 	:return: a bunch of designs specified by their width (cm), depth (cm), lower threshold (MeV), upper threshold (MeV),
 	         background sensitivity, and signal sensitivity
 	"""
 	os.makedirs("results", exist_ok=True)
 
-	if pulse_shape_discrimination:
+	if optimistic:
 		try:
-			parameters = loadtxt(f"results/pareto_{material}.txt")
+			parameters = loadtxt(f"results/pareto_{material}.txt", skiprows=1)
 		except FileNotFoundError:
-			raise FileNotFoundError("you have to calculate the pareto front without PSD before you can calculate it with.")
+			raise FileNotFoundError("you have to calculate the conservative pareto front before you can calculate the optimistic pareto front.")
 		results = []
 		for width, depth, lower_threshold, upper_threshold, _, signal_sensitivity in parameters:
 			expected_energy = csda_deposition(material, INCIDENT_ENERGY, depth)
 			relative_lower_threshold = lower_threshold - expected_energy
 			relative_upper_threshold = upper_threshold - expected_energy
+			coincidence_subtraction = True
+			pulse_shape_discrimination = material != "silicon"
 			background_sensitivity = calculate_background_sensitivity(
 				material, width, depth, relative_lower_threshold, relative_upper_threshold,
-				include_photons=True, include_neutrons=False, include_crosstalk=True)
+				include_photons=True,
+				include_neutrons=not pulse_shape_discrimination,
+				include_crosstalk=not coincidence_subtraction)
 			results.append((width, depth, lower_threshold, upper_threshold, background_sensitivity, signal_sensitivity))
 
 	else:
 		try:
-			results = loadtxt(f"results/pareto_{material}.txt")
+			results = loadtxt(f"results/pareto_{material}.txt", skiprows=1)
 		except FileNotFoundError:
 			logging.info(f"starting pareto front calculation for {material}...")
 			signal_sensitivities = 1 - linspace(1, 0, 9)[1:-1]**2
@@ -159,7 +161,9 @@ def find_pareto_front(material: str, pulse_shape_discrimination: bool) -> list[t
 					material, target_signal_sensitivity)
 				logging.info(f"found optimum that achieves {signal_sensitivity:.3g} for signal, {background_sensitivity:.3g} for background")
 				results.append((width, depth, lower_threshold, upper_threshold, background_sensitivity, signal_sensitivity))
-			savetxt(f"results/pareto_{material}.txt", results)
+			savetxt(
+				f"results/pareto_{material}.txt", results, delimiter="\t",
+				header="width (cm)\tdepth (cm)\tlower threshold (MeV)\tupper threshold (MeV)\tbackground sensitivity\tsignal_sensitivity\n")
 			logging.info(f"done!  saved to results/pareto_{material}.txt")
 
 	return results
@@ -245,7 +249,15 @@ def calculate_signal_sensitivity(
 		lower_threshold=expected_energy + relative_lower_threshold,
 		upper_threshold=expected_energy + relative_upper_threshold)
 	beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=min(2*width, LENGTH), x_limit=(width + detector.separation)/2)
-	signal_sensitivity, _ = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True)
+	signal_sensitivity, signal_sensitivity_unc, _, _ = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True)
+
+	if signal_sensitivity_unc > .10*signal_sensitivity:
+		logging.warning(
+			f"when calculating the sensitivity of a {detector.width:.2g}×{detector.depth:.2g} cm "
+			f"{detector.material_name} detector to signal electrons, counting only particles between "
+			f"{detector.lower_threshold:.2g} and {detector.upper_threshold:.2g} MeV, we got an unacceptably "
+			f"uncertain anser of {signal_sensitivity:.3g} ± {signal_sensitivity_unc:.3g}.")
+
 	return signal_sensitivity
 
 
@@ -268,15 +280,28 @@ def calculate_background_sensitivity(
 	photon_beam = Beam("photon", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
 	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*width, x_limit=(width + detector.separation)/2)
 	total_detection_rate = 0.
+	total_detection_rate_var = 0.
 	if include_neutrons:
-		neutron_sensitivity, _ = calculate_sensitivity(detector, neutron_beam, num_particles=1_000_000, use_cache=True)
+		neutron_sensitivity, neutron_sensitivity_unc, _, _ = calculate_sensitivity(detector, neutron_beam, num_particles=100_000, use_cache=True)
 		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*neutron_sensitivity
+		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius*neutron_sensitivity_unc)**2
 	if include_photons:
-		photon_sensitivity, _ = calculate_sensitivity(detector, photon_beam, num_particles=1_000_000, use_cache=True)
+		photon_sensitivity, photon_sensitivity_unc, _, _ = calculate_sensitivity(detector, photon_beam, num_particles=1_000_000, use_cache=True)
 		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity
+		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius*photon_sensitivity_unc)**2
 	if include_crosstalk:
-		_, crosstalk_sensitivity = calculate_sensitivity(detector, electron_beam, num_particles=100_000, use_cache=True)
+		_, _, crosstalk_sensitivity, crosstalk_sensitivity_unc = calculate_sensitivity(detector, electron_beam, num_particles=1_000_000, use_cache=True)
 		total_detection_rate += crosstalk_sensitivity
+		total_detection_rate_var += crosstalk_sensitivity_unc**2
+
+	total_detection_rate_unc = sqrt(total_detection_rate_var)
+	if total_detection_rate_unc > .10*total_detection_rate:
+		logging.warning(
+			f"when calculating the sensitivity of a {detector.width:.2g}×{detector.depth:.2g} cm "
+			f"{detector.material_name} detector to background, counting only particles between "
+			f"{detector.lower_threshold:.2g} and {detector.upper_threshold:.2g} MeV, we got an unacceptably "
+			f"uncertain anser of {total_detection_rate:.3g} ± {total_detection_rate_unc:.3g}.")
+
 	return total_detection_rate
 
 
