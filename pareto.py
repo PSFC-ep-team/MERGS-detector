@@ -2,7 +2,8 @@ import os
 import logging
 
 import matplotlib.pyplot as plt
-from numpy import pi, inf, array, linspace, savetxt, loadtxt, sqrt, concatenate, stack, zeros, full, interp, isclose
+from numpy import pi, inf, array, linspace, savetxt, loadtxt, sqrt, concatenate, stack, zeros, full, interp, isclose, \
+	quantile, nanmax
 from scipy import optimize, integrate
 
 from data import MATERIAL_DATA
@@ -87,14 +88,14 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 
 def plot_responses(detector: Detector):
 	""" plot the response of a given detector design to all three kinds of radiation """
-	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*detector.width, x_limit=(detector.width + detector.separation)/2)
+	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, width=detector.width, height=LENGTH, shape="rectangular")
 	electron_response, crosstalk_response, num_electrons = calculate_response(detector, electron_beam, num_particles=100_000)
 	electron_weight = 1/num_electrons
 	world_radius = sqrt(detector.width**2 + detector.depth**2 + detector.length**2)/2
-	neutron_beam = Beam("neutron", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
+	neutron_beam = Beam("neutron", BACKGROUND_SPECTRUM, distance=world_radius, shape="ambient")
 	neutron_response, _, num_neutrons = calculate_response(detector, neutron_beam, num_particles=1_000_000)
 	neutron_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/num_neutrons
-	photon_beam = Beam("photon", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
+	photon_beam = Beam("photon", BACKGROUND_SPECTRUM, distance=world_radius, shape="ambient")
 	photon_response, _, num_photons = calculate_response(detector, photon_beam, num_particles=1_000_000)
 	photon_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/num_photons
 
@@ -248,7 +249,7 @@ def calculate_signal_sensitivity(
 		material=material, width=width, depth=depth, length=LENGTH,
 		lower_threshold=expected_energy + relative_lower_threshold,
 		upper_threshold=expected_energy + relative_upper_threshold)
-	beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=min(2*width, LENGTH), x_limit=(width + detector.separation)/2)
+	beam = Beam("electron", MONOENERGETIC_SPECTRUM, width=width, height=LENGTH, shape="rectangular")
 	signal_sensitivity, signal_sensitivity_unc, _, _ = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True)
 
 	if signal_sensitivity_unc > .10*signal_sensitivity:
@@ -276,9 +277,9 @@ def calculate_background_sensitivity(
 		lower_threshold=expected_energy + relative_lower_threshold,
 		upper_threshold=expected_energy + relative_upper_threshold)
 	world_radius = sqrt((3*width)**2 + depth**2 + detector.length**2)/2
-	neutron_beam = Beam("neutron", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
-	photon_beam = Beam("photon", BACKGROUND_SPECTRUM, distance=world_radius, ambient=True)
-	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, diameter=2*width, x_limit=(width + detector.separation)/2)
+	neutron_beam = Beam("neutron", BACKGROUND_SPECTRUM, distance=world_radius, shape="ambient")
+	photon_beam = Beam("photon", BACKGROUND_SPECTRUM, distance=world_radius, shape="ambient")
+	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, width=width, height=LENGTH, shape="rectangular")
 	total_detection_rate = 0.
 	total_detection_rate_var = 0.
 	if include_neutrons:
@@ -340,6 +341,14 @@ def test_csda_deposition():
 	assert csda_deposition("silicon", 16.7, 0.0) == 0
 	assert csda_deposition("silicon", 16.7, 4.0) == 16.7
 	assert isclose(csda_deposition("silicon", 16.7, 0.1), 0.541, rtol=0.1)
+
+
+def test_exclusive_detector():
+	assert calculate_signal_sensitivity("EJ-276", 2, 5, -0.1, +0.1) < 0.1
+
+
+def test_thin_detector():
+	assert calculate_signal_sensitivity("EJ-276", 1, 0.1, -0.2, +0.4) > 0.90
 
 
 if __name__ == "__main__":

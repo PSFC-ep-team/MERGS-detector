@@ -18,7 +18,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 	"""
 	cache_key = (f"{detector.material_name}, {detector.width}, {detector.depth}, "
 	             f"{detector.lower_threshold}, {detector.upper_threshold}, "
-	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.distance}, {'ambient' if beam.ambient else 'collimated'}")
+	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.width}, {beam.height}, {beam.distance}, {beam.shape}")
 	if use_cache:
 		# first, try to load it from the cache
 		try:
@@ -37,7 +37,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 			return 0, 0, 0, 0
 		if skip_undetectable_tracks:
 			truncated_spectrum, simulated_fraction = beam.energy.truncate(detector.lower_threshold)
-			beam = Beam(beam.particle_name, truncated_spectrum, beam.diameter, beam.x_limit, beam.distance, beam.ambient)
+			beam = Beam(beam.particle_name, truncated_spectrum, beam.shape, beam.diameter, beam.width, beam.height, beam.distance)
 		else:
 			simulated_fraction = 1
 	else:
@@ -84,7 +84,7 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> t
 			solids.append(Solid("box", x_position=x, x=detector.separation, y=detector.length, z=detector.depth, material="aluminum"))
 
 	# run the simulation
-	entries, num_particles = simulate(
+	entries = simulate(
 		detector.material_name,
 		solids,
 		beam,

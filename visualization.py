@@ -17,7 +17,7 @@ def plot_moliere_radius(material: str, beam: Beam, num_particles=10000) -> float
 	cylinders = []
 	for i in range(1, radius_bins.size):
 		cylinders.append(Solid("tube", z=20, deltaphi=2*pi, rmin=radius_bins[i - 1], rmax=radius_bins[i]))
-	entries, _ = simulate(material, cylinders, beam, num_particles)
+	entries = simulate(material, cylinders, beam, num_particles)
 	deposition = histogram(
 		entries["detector"], weights=entries["E_depositedMeV"], bins=arange(-1/2, len(cylinders)))[0]
 	total_deposition = sum(deposition)
@@ -67,7 +67,7 @@ def plot_heatmap(detector: Detector, beam: Beam, num_particles=10000) -> None:
 				z=z_sizes[j],
 			))
 
-	entries, _ = simulate(detector.material_name, grid, beam, num_particles=num_particles)
+	entries = simulate(detector.material_name, grid, beam, num_particles=num_particles)
 	deposition = reshape(
 		histogram(entries["detector"], weights=entries["E_depositedMeV"], bins=arange(len(grid) + 1))[0],
 		shape=(x_positions.size, z_positions.size))/num_particles/(x_sizes[0]*z_sizes[0])

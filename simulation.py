@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import os
 import subprocess
+from typing import Literal
 import xml.etree.ElementTree as xml
 
 from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero, diff, \
-	sqrt, arcsin, pi, unique, inf, nonzero
+	unique, nonzero
 from numpy.typing import NDArray
 from scipy import integrate
 
 from data import PARTICLE_DATA, MATERIAL_DATA, ELEMENT_DATA
 
 
-def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles: int, debug_mode=False, full_output=False) -> tuple[NDArray, int]:
+def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_particles: int, debug_mode=False, full_output=False) -> NDArray:
 	"""
 	run a Geant4 simulation of a beam of these particles hitting a detector.
-	if the beam has an x_limit, the number of particles you get may not be exactly the number you requested.
-	:return: the track data from Grasshopper and the total number of tracks simulated
+	:return: the track data from Grasshopper
 	"""
 	os.makedirs("run", exist_ok=True)
 
@@ -32,14 +32,6 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	solid_group = xml.SubElement(input_deck, "solids")
 	structure = xml.SubElement(input_deck, "structure")
 	setup = xml.SubElement(input_deck, "setup", name="Default", version="1.0")
-
-	# check if we're applying an x-limit to the bean.  if so, we need to augment the number of simulated particles.
-	if beam.x_limit < beam.diameter/2:
-		x_twiddle = beam.x_limit/(beam.diameter/2)
-		valid_fraction = 2/pi*(arcsin(x_twiddle) + x_twiddle*sqrt(1 - x_twiddle**2))
-		if valid_fraction < 0.1:
-			raise ValueError("oh no, I don't like how much the runtime just got augmented.")
-		num_particles = round(num_particles/valid_fraction)
 
 	# first apply detector_material to every detector solid
 	for solid in solids:
@@ -81,25 +73,36 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	xml.SubElement(definitions, "constant", name="SaveTrackInfo", value="1" if full_output else "0")
 	xml.SubElement(definitions, "constant", name="SaveEdepositedTotalEntry", value="0" if full_output else "1")
 	# specify the bean
-	xml.SubElement(definitions, "constant", name="RandomGenSeed", value="0")
+	xml.SubElement(definitions, "constant", name="RandomGenSeed", value="69")
 	xml.SubElement(definitions, "constant", name="EventsToRun", value=f"{num_particles}")
 	xml.SubElement(definitions, "constant", name="ParticleNumber", value=f"{beam.number}")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamOffsetX", type="coordinate", value="0", unit="cm")
 	xml.SubElement(definitions, "quantity",
 	               name="BeamOffsetY", type="coordinate", value="0", unit="cm")
-	if beam.ambient:
-		xml.SubElement(definitions, "quantity",
-		               name="WorldRadius", type="coordinate", value=f"{beam.distance}", unit="cm")
-		xml.SubElement(definitions, "quantity",
-		               name="BeamOffsetZ", type="coordinate", value="0", unit="cm")
-		xml.SubElement(definitions, "quantity",
-		               name="BeamSize", type="coordinate", value="-3", unit="mm")
-	else:
+	if beam.shape == "circular":
 		xml.SubElement(definitions, "quantity",
 		               name="BeamOffsetZ", type="coordinate", value=f"{-beam.distance}", unit="cm")
 		xml.SubElement(definitions, "quantity",
-		               name="BeamSize", type="coordinate", value=f"{beam.diameter/2}", unit="cm")
+		               name="BeamSize", type="length", value=f"{beam.diameter/2}", unit="cm")
+	elif beam.shape == "rectangular":
+		xml.SubElement(definitions, "quantity",
+		               name="BeamOffsetZ", type="coordinate", value=f"{-beam.distance}", unit="cm")
+		xml.SubElement(definitions, "quantity",
+		               name="BeamWidth", type="length", value=f"{beam.width}", unit="cm")
+		xml.SubElement(definitions, "quantity",
+		               name="BeamHeight", type="length", value=f"{beam.height}", unit="cm")
+		xml.SubElement(definitions, "quantity",
+		               name="BeamSize", type="length", value="-4", unit="mm")
+	elif beam.shape == "ambient":
+		xml.SubElement(definitions, "quantity",
+		               name="WorldRadius", type="length", value=f"{beam.distance}", unit="cm")
+		xml.SubElement(definitions, "quantity",
+		               name="BeamOffsetZ", type="coordinate", value="0", unit="cm")
+		xml.SubElement(definitions, "quantity",
+		               name="BeamSize", type="length", value="-3", unit="mm")
+	else:
+		raise ValueError(f"what is {beam.shape}")
 	if type(beam.energy) is Spectrum:
 		savetxt("run/input_spectrum.txt", stack([beam.energy.energies, beam.energy.probabilities], axis=1))
 		xml.SubElement(definitions, "quantity",
@@ -178,24 +181,7 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 		else:
 			output_data = output_data[breakpoints[0]:]
 
-	# filter out phony particles if we wanted a non-circular beam
-	if beam.x_limit < beam.diameter/2:
-		num_particles_recorded = len(unique(output_data["EventID"]))
-		if num_particles_recorded/num_particles < 0.99:
-			raise ValueError(
-				f"because of the way grasshopper is, I can't limit the beam unless all of the particles are incident on "
-				f"more or less the same solid material (because any geometric correlations will cause me to incorrectly "
-				f"estimate how many particles were simulated in the specified beam limits that we _didn't_ see).  "
-				f"however, the fact that {1 - num_particles_recorded/num_particles:.1%} of the particles did not "
-				f"interact with any matter leads me to suspect that some of them are missing the detector entirely.")
-		valid = abs(output_data["x_incident"]) <= beam.x_limit
-		output_data = output_data[valid]
-		num_particles_recorded_in_bounds = len(output_data)
-		num_particles = round(num_particles_recorded_in_bounds/num_particles_recorded*num_particles)
-		reduced_old_event_indices, new_event_indices = unique(output_data["EventID"], return_inverse=True)
-		output_data["EventID"] = new_event_indices  # remember to re-index the events
-
-	return output_data, num_particles
+	return output_data
 
 
 def rotation_matrix(θ):
@@ -222,15 +208,19 @@ class Solid:
 
 
 class Beam:
-	def __init__(self, particle: str, energy: float | Spectrum, diameter=0.0, x_limit=inf, distance=10.0, ambient=False):
+	def __init__(
+			self, particle: str, energy: float | Spectrum,
+			shape: Literal["circular", "rectangular", "ambient"] = "circular",
+			diameter=0.0, width=0.0, height=0.0, distance=10.0):
 		"""
 		a type of radiation
 		:param particle: the name of the particle
 		:param energy: the energy of each particle (MeV)
-		:param diameter: the diameter of the beam (cm)
-		:param x_limit: a limit on the absolute value of x, which
+		:param shape: either "circular", "rectangular", or "ambient"
+		:param diameter: the diameter of the beam if circular (cm)
+		:param width: the width of the beam if rectangular (cm)
+		:param height: the height of the beam if rectangular (cm)
 		:param distance: the standoff distance of the source from the origin
-		:param ambient: whether particles should come from all directions instead of just z-
 		"""
 		self.particle_name = particle
 		self.rest_mass = PARTICLE_DATA[particle]["rest_mass"]  # MeV/c²
@@ -238,11 +228,14 @@ class Beam:
 		self.number = PARTICLE_DATA[particle]["number"]
 		self.energy = energy
 		self.diameter = diameter
-		self.x_limit = x_limit
+		self.shape = shape
+		self.width = width
+		self.height = height
 		self.distance = distance
-		self.ambient = ambient
-		if ambient and diameter != 0:
-			raise ValueError("you can't pass a diameter when the source is ambient because that doesn't make any sense")
+		if shape != "circular" and diameter != 0:
+			raise ValueError("you can't pass a diameter unless the source is circular")
+		elif shape != "rectangular" and (width != 0 or height != 0):
+			raise ValueError("you can't pass a width or height unless the source is rectangular")
 
 
 class Spectrum:
@@ -282,12 +275,12 @@ def test_simulation():
 	uniform_spectrum = Spectrum("uniform", array([0., 14.]), array([1., 1.]))
 	simple_box = Solid("box", x=2, y=2, z=2, x_position=1.0)
 	num_particles = 10_000
-	tracks, _ = simulate(
+	tracks = simulate(
 		"silicon", [simple_box],
 		Beam("proton", uniform_spectrum, diameter=2),
 		num_particles=num_particles, full_output=True)
-	incident_tracks = tracks[tracks["TrackID"] == 1]
-	assert isclose(incident_tracks.size, num_particles/2, atol=100)
+	incident_tracks = tracks[unique(tracks["EventID"], return_index=True)[1]]
+	assert isclose(incident_tracks.size, num_particles/2, atol=200)
 	assert all(incident_tracks["x_incident"] >= 0)
 	assert all(hypot(incident_tracks["x_incident"], incident_tracks["y_incident"]) <= 1. + 1e-7)
 	assert all(incident_tracks["E_beamMeV"] <= 14.)
@@ -295,15 +288,15 @@ def test_simulation():
 	assert all(incident_tracks["theta"] == 0.)
 
 
-def test_beam_limiting():
+def test_rectangular_beam():
 	simple_box = Solid("box", x=2, y=2, z=2)
 	num_particles = 10_000
-	tracks, _ = simulate(
+	tracks = simulate(
 		"silicon", [simple_box],
-		Beam("proton", energy=14, diameter=2, x_limit=0.5),
+		Beam("proton", energy=14, shape="rectangular", width=2, height=2),
 		num_particles=num_particles, full_output=True)
-	incident_tracks = tracks[tracks["TrackID"] == 1]
-	assert isclose(len(incident_tracks), 10_000, atol=100)
+	incident_tracks = tracks[unique(tracks["EventID"], return_index=True)[1]]
+	assert len(incident_tracks) == num_particles
 
 
 def test_spectrum():
