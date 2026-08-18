@@ -85,6 +85,6 @@ def plot_heatmap(detector: Detector, beam: Beam, num_particles=10000) -> None:
 if __name__ == "__main__":
 	print(plot_moliere_radius("LYSO", Beam("electron", 16.7)))
 	print(plot_moliere_radius("LaBr3", Beam("electron", 16.7)))
-	print(plot_moliere_radius("EJ-276", Beam("electron", 16.7)))
+	print(plot_moliere_radius("EJ-276D", Beam("electron", 16.7)))
 	plot_heatmap(Detector("EJ-100", 5, 8), Beam("electron", 16.7))
 	plt.show()

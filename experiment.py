@@ -22,7 +22,7 @@ NUM_PARTICLES = 10_000
 
 # combined EJ276 to stop whole beam
 entries = simulate(
-	"EJ-276",
+	"EJ-276D",
 	[
 		Solid("box", x=CHANNEL_DEPTH, y=10.0, z=2*CHANNEL_WIDTH),
 	],
@@ -34,14 +34,14 @@ counts, _, _ = plt.hist(entries["E_depositedMeV"], bins=energy_bins)
 plt.xlim(0, energy_bins[-1])
 plt.ylim(0, min(counts.max()*1.05, partition(counts, -2)[-2]*1.5))
 plt.xlabel("Energy deposited (MeV)")
-plt.title("Triple block of EJ-276")
+plt.title("Triple block of EJ-276D")
 plt.tight_layout()
 plt.savefig("figures/experiment_triple_block.pdf")
 print(f"{counts.max()/NUM_PARTICLES:.1%} of the electrons are fully stopped")
 
 # adjacent EJ276 to look at cross-talk
 entries = simulate(
-	"EJ-276",
+	"EJ-276D",
 	[
 		Solid("box", x=CHANNEL_WIDTH, y=10.0, z=CHANNEL_DEPTH, x_position=0.0),
 		Solid("box", x=CHANNEL_WIDTH, y=10.0, z=CHANNEL_DEPTH, x_position=CHANNEL_WIDTH),
@@ -55,13 +55,13 @@ for detector in range(3):
 	plt.hist(entries[here]["E_depositedMeV"], bins=energy_bins)
 plt.xlim(0, energy_bins[-1])
 plt.xlabel("Energy deposited (MeV)")
-plt.title("Adjacent EJ-276s")
+plt.title("Adjacent EJ-276Ds")
 plt.tight_layout()
 plt.savefig("figures/experiment_block_crosstalk.pdf")
 
 # stacked EJ276 to look at stopping
 entries = simulate(
-	"EJ-276",
+	"EJ-276D",
 	[
 		Solid("box", x=CHANNEL_DEPTH, y=10.0, z=CHANNEL_WIDTH, z_position=0.0),
 		Solid("box", x=CHANNEL_DEPTH, y=10.0, z=CHANNEL_WIDTH, z_position=CHANNEL_WIDTH),
@@ -75,7 +75,7 @@ for detector in range(3):
 	plt.hist(entries[here]["E_depositedMeV"], bins=energy_bins)
 plt.xlim(0, energy_bins[-1])
 plt.xlabel("Energy deposited (MeV)")
-plt.title("Stacked EJ-276s")
+plt.title("Stacked EJ-276Ds")
 plt.tight_layout()
 plt.savefig("figures/experiment_block_stopping.pdf")
 
