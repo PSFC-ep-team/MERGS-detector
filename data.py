@@ -1,6 +1,7 @@
 MATERIAL_DATA = {
 	"LaBr3": {
 		"density": 5.06,
+		"efficiency": 63_000.*.10,
 		"elements": {
 			"La": 1,
 			"Br": 3,
@@ -8,6 +9,7 @@ MATERIAL_DATA = {
 	},
 	"LYSO": {
 		"density": 7.1,
+		"efficiency": 33_200.*.10,
 		"elements": {
 			"Lu": 18,
 			"Y": 2,
@@ -15,15 +17,17 @@ MATERIAL_DATA = {
 			"O": 50,
 		},
 	},
-	"EJ-276": {
-		"density": 1.096,
+	"EJ-276D": {
+		"density": 1.099,
+		"efficiency": 8_600.*.10,
 		"elements": {
-			"C": 491,
-			"H": 455,
+			"C": 4944,
+			"H": 4647,
 		},
 	},
 	"EJ-100": {
 		"density": 1.03,
+		"efficiency": 10_000.*.10,
 		"elements": {
 			"C": 468,
 			"H": 516,
@@ -31,6 +35,7 @@ MATERIAL_DATA = {
 	},
 	"quartz": {
 		"density": 2.65,
+		"efficiency": 69.*.10,
 		"elements": {
 			"Si": 1,
 			"O": 2,
@@ -38,18 +43,21 @@ MATERIAL_DATA = {
 	},
 	"aluminum": {
 		"density": 2.699,
+		"efficiency": 0,
 		"elements": {
 			"Al": 1,
 		},
 	},
 	"silicon": {
 		"density": 2.329,
+		"efficiency": 276_000.,
 		"elements": {
 			"Si": 1,
 		},
 	},
 	"PMMA": {
 		"density": 1.18,
+		"efficiency": 69.*.10,
 		"elements": {
 			"C": 5,
 			"H": 8,

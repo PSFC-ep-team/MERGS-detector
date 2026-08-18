@@ -101,6 +101,7 @@ def plot_responses(detector: Detector):
 
 	energy_bins = linspace(0.05, min(17.05, 1.5*detector.upper_threshold), 86)
 	plt.figure()
+	# plot the histograms
 	for histogram_type, opacity, attach_label in [("stepfilled", 1/4, False), ("step", 1, True)]:
 		counts, _, _ = plt.hist(
 			[electron_response, crosstalk_response, photon_response, neutron_response],
@@ -110,8 +111,18 @@ def plot_responses(detector: Detector):
 			label=["Signal", "Cross-talk", "Photons", "Neutrons"] if attach_label else None,
 			histtype=histogram_type, alpha=opacity,
 		)
+	# plot the thresholds
 	plt.axvline(detector.lower_threshold, linestyle="--", color="k")
 	plt.axvline(detector.upper_threshold, linestyle="--", color="k")
+	# plot the energy uncertainty at each threshold
+	efficiency = MATERIAL_DATA[detector.material_name]["efficiency"]
+	plt.errorbar(
+		detector.lower_threshold, counts[0].max()*2/3,
+		xerr=sqrt(detector.lower_threshold/efficiency), color="k", capsize=5)
+	plt.errorbar(
+		detector.upper_threshold, counts[0].max()*2/3,
+		xerr=sqrt(detector.upper_threshold/efficiency), color="k", capsize=5)
+	# adjust the axes
 	plt.xlim(0, min(1.5*detector.upper_threshold, 18))
 	plt.ylim(0, counts[0].max()*1.05)
 	plt.legend()
@@ -337,6 +348,10 @@ def csda_deposition(material: str, initial_energy: float, distance: float) -> fl
 	return initial_energy - final_energy
 
 
+def test_plot_responses():
+	plot_responses(Detector("EJ-276D", width=2, depth=5, lower_threshold=5, upper_threshold=17))
+
+
 def test_csda_deposition():
 	assert csda_deposition("silicon", 16.7, 0.0) == 0
 	assert csda_deposition("silicon", 16.7, 4.0) == 16.7
@@ -344,15 +359,15 @@ def test_csda_deposition():
 
 
 def test_exclusive_detector():
-	assert calculate_signal_sensitivity("EJ-276", 2, 5, -0.1, +0.1) < 0.1
+	assert calculate_signal_sensitivity("EJ-276D", 2, 5, -0.1, +0.1) < 0.1
 
 
 def test_thin_detector():
-	assert calculate_signal_sensitivity("EJ-276", 1, 0.1, -0.2, +0.4) > 0.90
+	assert calculate_signal_sensitivity("EJ-276D", 1, 0.1, -0.2, +0.4) > 0.90
 
 
 if __name__ == "__main__":
 	plot_pareto_fronts(
-		["EJ-276", "EJ-100", "LaBr3", "silicon"],
-		{"EJ-276": "C2.-", "EJ-100": "C2--", "LaBr3": "C0-", "silicon": "C1:"})
+		["EJ-276D", "EJ-100", "LaBr3", "silicon"],
+		{"EJ-276D": "C2.-", "EJ-100": "C2--", "LaBr3": "C0-", "silicon": "C1:"})
 	plt.show()
