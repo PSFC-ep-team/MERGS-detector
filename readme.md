@@ -37,6 +37,12 @@ Install my special version from [github.com/jkunimune/grasshopper](https://githu
 
 I mean there's no installation needed for this repo but here is some advice for installing Grasshopper.
 
+This will require Make and CMake.  If you're on the engaging cluster, CMake is part of a module that's not loaded by default, so make sure you load that (and its dependency, gcc) first.
+```bash
+module load gcc
+module load cmake
+```
+
 ### Using CMake (I hate software developers)
 First of all, if you haven't used CMake, you need to use it thrice here, and I hate it because it's terrible so I'm just going to summarize CMake here.
 In the year 2000, computer programmers had invented the computer program but hadn't yet invented computer programs that do two things in sequence.
@@ -97,7 +103,7 @@ But if you're on the engaging cluster you need to load it as a module, and it's 
 ```bash
 module --show_hidden spider expat
 ```
-and then you have to load one of the available versions that comes up.
+and then you have to `module load` one of the available versions that comes up.
 If you have issues, an alternative approach is to configure Geant4 to use internal Expat with `-D GEANT4_USE_SYSTEM_EXPAT=OFF`
 
 Then you can move on to Geant itself.  Download the source, then configure it with CMake, then build it with Make, then install it with Make.
