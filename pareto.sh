@@ -2,7 +2,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --time=11:59:00
-#SBATCH --partition=mit_normal
+#SBATCH --partition=sched_mit_psfc
 #SBATCH --mem-per-cpu=8000
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=kunimune@mit.edu
