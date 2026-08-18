@@ -49,7 +49,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 			x=concatenate([[0], fronts[material][False][:, 4]]),
 			y=concatenate([[0], fronts[material][False][:, 5]]),
 			xerr=stack([
-				concatenate([[0], fronts[material][True][:, 4] - fronts[material][False][:, 4]]),
+				concatenate([[0], fronts[material][False][:, 4] - fronts[material][True][:, 4]]),
 				zeros(len(fronts[material][False]) + 1)],
 				axis=0,
 			),
@@ -99,20 +99,20 @@ def plot_responses(detector: Detector):
 	photon_response, _, num_photons = calculate_response(detector, photon_beam, num_particles=1_000_000)
 	photon_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/num_photons
 
-	energy_bins = linspace(0.05, 17.05, 86)
+	energy_bins = linspace(0.05, min(17.05, 1.5*detector.upper_threshold), 86)
 	plt.figure()
 	for histogram_type, opacity, attach_label in [("stepfilled", 1/4, False), ("step", 1, True)]:
 		counts, _, _ = plt.hist(
 			[electron_response, crosstalk_response, photon_response, neutron_response],
 			energy_bins,
-			weights=[full(electron_response.size, electron_weight), full(electron_response.size, electron_weight), full(neutron_response.size, neutron_weight), full(photon_response.size, photon_weight)],
+			weights=[full(electron_response.size, electron_weight), full(crosstalk_response.size, electron_weight), full(photon_response.size, neutron_weight), full(neutron_response.size, photon_weight)],
 			color=["tab:orange", "tab:red", "tab:green", "tab:gray"],
 			label=["Signal", "Cross-talk", "Photons", "Neutrons"] if attach_label else None,
 			histtype=histogram_type, alpha=opacity,
 		)
 	plt.axvline(detector.lower_threshold, linestyle="--", color="k")
 	plt.axvline(detector.upper_threshold, linestyle="--", color="k")
-	plt.xlim(0, 17)
+	plt.xlim(0, min(1.5*detector.upper_threshold, 18))
 	plt.ylim(0, counts[0].max()*1.05)
 	plt.legend()
 	plt.xlabel("Deposited energy (MeV)")
@@ -142,7 +142,7 @@ def find_pareto_front(material: str, optimistic: bool) -> list[tuple[float, floa
 			relative_lower_threshold = lower_threshold - expected_energy
 			relative_upper_threshold = upper_threshold - expected_energy
 			coincidence_subtraction = True
-			pulse_shape_discrimination = material != "silicon"
+			pulse_shape_discrimination = material.startswith("EJ")
 			background_sensitivity = calculate_background_sensitivity(
 				material, width, depth, relative_lower_threshold, relative_upper_threshold,
 				include_photons=True,
@@ -283,7 +283,7 @@ def calculate_background_sensitivity(
 	total_detection_rate = 0.
 	total_detection_rate_var = 0.
 	if include_neutrons:
-		neutron_sensitivity, neutron_sensitivity_unc, _, _ = calculate_sensitivity(detector, neutron_beam, num_particles=100_000, use_cache=True)
+		neutron_sensitivity, neutron_sensitivity_unc, _, _ = calculate_sensitivity(detector, neutron_beam, num_particles=1_000_000, use_cache=True)
 		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*neutron_sensitivity
 		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius*neutron_sensitivity_unc)**2
 	if include_photons:
@@ -291,7 +291,7 @@ def calculate_background_sensitivity(
 		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity
 		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius*photon_sensitivity_unc)**2
 	if include_crosstalk:
-		_, _, crosstalk_sensitivity, crosstalk_sensitivity_unc = calculate_sensitivity(detector, electron_beam, num_particles=1_000_000, use_cache=True)
+		_, _, crosstalk_sensitivity, crosstalk_sensitivity_unc = calculate_sensitivity(detector, electron_beam, num_particles=100_000, use_cache=True)
 		total_detection_rate += crosstalk_sensitivity
 		total_detection_rate_var += crosstalk_sensitivity_unc**2
 
