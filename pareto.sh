@@ -2,14 +2,15 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --time=11:59:00
-#SBATCH --partition=sched_mit_psfc
+#SBATCH --partition=mit_normal
 #SBATCH --mem-per-cpu=8000
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=kunimune@mit.edu
 
-module purge
+echo "running on the $SLURM_JOB_PARTITION partition, on node $SLURM_JOB_NODELIST"
+
 module load miniforge
-conda activate geant_env
+conda activate grasshoppenv
 
 cd $HOME/MERGS-detector
 

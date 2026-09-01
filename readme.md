@@ -43,6 +43,11 @@ module load gcc
 module load cmake
 ```
 
+It's often recommended that you install stuff like this in a Python virtualenv,
+as that helps insulate different projects from each other in case they have different version requirements, and helps to avoid unexpected problems when working on one project breaks another.
+However, it's not perfect, as virtualenvs won't save you from ORCD "maintenance", or from differences between nodes (like the fact that none of the sched_mit_psfc nodes seem to have GLIBC_2.27),
+so I'd hardly call it a necessity.
+
 ### Using CMake (I hate software developers)
 First of all, if you haven't used CMake, you need to use it thrice here, and I hate it because it's terrible so I'm just going to summarize CMake here.
 In the year 2000, computer programmers had invented the computer program but hadn't yet invented computer programs that do two things in sequence.
@@ -98,18 +103,11 @@ I don't know what determines when it's which; you just have to look inside the i
 
 ### Installing Geant4
 
-Now you need to install Geant4.  For this, you'll need Expat.  IDK what Expat is, but most systems seem to have it already installed so you probably don't have to worry about installing it.
-But if you're on the engaging cluster you need to load it as a module, and it's hidden.  So first you have to search for it with
-```bash
-module --show_hidden spider expat
-```
-and then you have to `module load` one of the available versions that comes up.
-If you have issues, an alternative approach is to configure Geant4 to use internal Expat with `-D GEANT4_USE_SYSTEM_EXPAT=OFF`
-
-Then you can move on to Geant itself.  Download the source, then configure it with CMake, then build it with Make, then install it with Make.
+Now you need to install Geant4.  Download the source, then configure it with CMake, then build it with Make, then install it with Make.
 There are many CMake options, but the important ones are:
 * `GEANT4_USE_GDML` which Grasshopper requires be set to `ON`
 * `GEANT4_INSTALL_DATA` which must be set to `ON`, unless you don't want data which I guess is the default for some reason?
+* `GEANT4_USE_SYSTEM_EXPAT` which must be set to `OFF` so that it uses its included install of Expat (this isn't needed if Expat is available on your machine, which it often is, but like why not just use the version that's known to work with Geant4?)
 * `GEANT4_BUILD_MULTITHREADED` which you presumably want `ON`, especially if you're building on a cluster
 * `CMAKE_PREFIX_PATH` which must point to Xerces if Xerces wasn't installed in the default place
 
@@ -118,8 +116,8 @@ The build step takes a while here, so you might want to move it into a Slurm par
 ```bash
 mkdir ~/geant4-build
 cd ~/geant4-build
-cmake -D GEANT4_USE_GDML=ON -D GEANT4_INSTALL_DATA=ON -D GEANT4_BUILD_MULTITHREADED=ON -D CMAKE_PREFIX_PATH=~/xerces-install -D CMAKE_INSTALL_PREFIX=~/geant4-install ~/geant4-src
-sbatch --time=2:00:00 --wrap="make && make install"
+cmake -D GEANT4_USE_GDML=ON -D GEANT4_INSTALL_DATA=ON -D GEANT4_BUILD_MULTITHREADED=ON -D GEANT4_USE_SYSTEM_EXPAT=OFF -D CMAKE_PREFIX_PATH=~/xerces-install -D CMAKE_INSTALL_PREFIX=~/geant4-install ~/geant4-src
+sbatch --time=1:00:00 --cpus-per-task=64 --wrap="make && make install"
 ```
 
 After it's installed, if you changed the install directory, you need to add the install's library subdirectory to your library path.
@@ -132,8 +130,11 @@ I don't know what determines when it's which; you just have to look inside the i
 ### Installing Grasshopper
 
 Finally, Grasshopper.  Download the source, then configure it with CMake, then build it with Make, then install it with Make.
-The only CMake option you need is `DGeant4_DIR` which should point to the `lib/cmake/Geant4/` subfolder of the Geant4 installation,
-if Geant4 wasn't installed in the default place.
+The relevant CMake options are:
+* `Geant4_DIR` which should point to the `lib64/cmake/Geant4/` subfolder of the Geant4 installation, if Geant4 wasn't installed in the default place
+* `XercesC_LIBRARY` which should point to the installed Xerces shared object file, if Xerces wasn't installed in the default place
+* `XercesC_INCLUDE_DIR` which should point to the `include/` subfolder of the Xerces installation, if Xerces wasn't installed in the default place
+* `XercesC_VERSION` which should be set to the version of Xerces you installed, if Xerces wasn't installed in the default place
 
 Areg says you also need to pass a `-jN` flag to Make to specify how many cores it can use, but you don't need to do that as long as you're either in a partition or on a personal device.
 Just let it infer the number of cores you have (this is one of the few actually good defaults).
@@ -141,7 +142,7 @@ Just let it infer the number of cores you have (this is one of the few actually 
 ```bash
 mkdir ~/grasshopper-build
 cd ~/grasshopper-build
-cmake -D Geant4_DIR=~/geant4-install/lib/cmake/Geant4 -D CMAKE_INSTALL_PREFIX=~/grasshopper-install ~/grasshopper-src
+cmake -D Geant4_DIR=~/geant4-install/lib64/cmake/Geant4 -D XercesC_LIBRARY=~/xerces-install/lib64/libxerces-c.so -D XercesC_INCLUDE_DIR=~/xerces-install/include -D XercesC_VERSION=3.3 -D CMAKE_INSTALL_PREFIX=~/grasshopper-install ~/grasshopper-src
 make
 make install
 ```
