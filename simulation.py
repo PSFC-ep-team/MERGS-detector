@@ -264,6 +264,8 @@ class Spectrum:
 		total_sum = integrate.trapezoid(self.probabilities, self.energies)
 		above_lower_bound = self.energies > lower_bound
 		p_bound = interp(lower_bound, self.energies, self.probabilities)
+		if p_bound == 0 and all(self.probabilities[above_lower_bound] == 0):
+			raise ValueError("the specified lower bound is above the highest nonzero part of the spectrum, so the truncated spectrum would have no mass")
 		new_energies = concatenate([[lower_bound], self.energies[above_lower_bound]])
 		new_probabilities = concatenate([[p_bound], self.probabilities[above_lower_bound]])
 		truncated_sum = integrate.trapezoid(new_probabilities, new_energies)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from numpy import count_nonzero, inf, histogram, array, isclose, sqrt, concatenate
+from numpy import inf, histogram, array, isclose, sqrt, concatenate
 from numpy.typing import NDArray
 from scipy.special import erf
 
@@ -38,8 +38,15 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 	if type(beam.energy) is Spectrum:
 		if skip_undetectable_tracks:
 			lower_error = sqrt(max(0, detector.lower_threshold)/efficiency)
-			truncated_spectrum, simulated_fraction = beam.energy.truncate(min(detector.lower_threshold, beam.energy.energies.max()) - 3*lower_error)
-			beam = Beam(beam.particle_name, truncated_spectrum, beam.shape, beam.diameter, beam.width, beam.height, beam.distance)
+			try:
+				truncated_spectrum, simulated_fraction = beam.energy.truncate(min(detector.lower_threshold, beam.energy.energies.max()) - 3*lower_error)
+			except ValueError as e:
+				if "the truncated spectrum would have no mass" in str(e):
+					return 0, 0, 0, 0
+				else:
+					raise
+			else:
+				beam = Beam(beam.particle_name, truncated_spectrum, beam.shape, beam.diameter, beam.width, beam.height, beam.distance)
 		else:
 			simulated_fraction = 1
 	else:

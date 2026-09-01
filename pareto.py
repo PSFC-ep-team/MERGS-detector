@@ -2,8 +2,9 @@ import os
 import logging
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import LogLocator
 from numpy import pi, inf, array, linspace, savetxt, loadtxt, sqrt, concatenate, stack, zeros, full, interp, isclose, \
-	quantile, nanmax
+	quantile, nanmax, geomspace, empty
 from scipy import optimize, integrate
 
 from data import MATERIAL_DATA
@@ -23,16 +24,15 @@ logging.getLogger().addHandler(logging.StreamHandler())
 LENGTH = 10  # cm
 INCIDENT_ENERGY = 16.7
 MONOENERGETIC_SPECTRUM = Spectrum("16.5–16.9", array([INCIDENT_ENERGY - 0.2, INCIDENT_ENERGY + 0.2]), array([1., 1.]))
-BACKGROUND_FLUENCE = 1e+0  # particle/cm²/electron
+BACKGROUND_FLUENCE = 1e+1  # particle/cm²/electron
 
-neutron_data = loadtxt("data/neutron-background.csv", skiprows=1, delimiter=",", quotechar='"')
-photon_data = loadtxt("data/photon-background.csv", skiprows=1, delimiter=",", quotechar='"')
+data = loadtxt("data/background-spectrum.csv", skiprows=1, delimiter=",", quotechar='"')
 BACKGROUND_NEUTRON_SPECTRUM = Spectrum(
-	"scattered neuts", (neutron_data[:, 0] + neutron_data[:, 1])/2, neutron_data[:, 2])
+	"scattered neuts", (data[:, 0] + data[:, 1])/2, data[:, 2])
 BACKGROUND_PHOTON_SPECTRUM = Spectrum(
-	"scattered phots", (photon_data[:, 0] + photon_data[:, 1])/2, photon_data[:, 2])
-neutron_sum = sum(neutron_data[:, 2]*(neutron_data[:, 1] - neutron_data[:, 0]))
-photon_sum = sum(photon_data[:, 2]*(photon_data[:, 1] - photon_data[:, 0]))
+	"scattered phots", (data[:, 0] + data[:, 1])/2, data[:, 4])
+neutron_sum = sum(data[:, 2]*(data[:, 1] - data[:, 0]))
+photon_sum = sum(data[:, 4]*(data[:, 1] - data[:, 0]))
 NEUTRON_FRACTION = neutron_sum/(neutron_sum + photon_sum)
 PHOTON_FRACTION = photon_sum/(neutron_sum + photon_sum)
 
@@ -375,70 +375,70 @@ def test_thin_detector():
 	assert calculate_signal_sensitivity("EJ-276D", 1, 0.1, -0.2, +0.4) > 0.90
 
 
-# def test_objective_space():
-# 	n = 9
-# 	material = "EJ-276D"
-#
-# 	widths = linspace(0.1, 5.0, n)
-# 	depths = linspace(0.1, 10.0, n)
-# 	relative_lower_thresholds = linspace(-6., 0., n)
-# 	relative_upper_thresholds = linspace(0., 3., n)
-#
-# 	signal_sensitivities = empty((n, n))
-# 	background_sensitivities = empty((n, n))
-#
-# 	relative_lower_threshold = relative_lower_thresholds[n//2]
-# 	relative_upper_threshold = relative_upper_thresholds[n//2]
-# 	for i, width in enumerate(widths):
-# 		for j, depth in enumerate(depths):
-# 			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-# 			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-# 	plot_objective_space_slice(
-# 		widths, depths, signal_sensitivities, background_sensitivities,
-# 		"Width (cm)", "Depth (cm)")
-# 	plt.savefig("figures/objective_slice_width-depth.pdf")
-#
-# 	width = widths[n//2]
-# 	for i, relative_lower_threshold in enumerate(relative_lower_thresholds):
-# 		if i == n//2: pass
-# 		for j, depth in enumerate(depths):
-# 			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-# 			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-# 	plot_objective_space_slice(
-# 		relative_lower_thresholds, depths, signal_sensitivities, background_sensitivities,
-# 		"Relative lower threshold (MeV)", "Depth (cm)")
-# 	plt.savefig("figures/objective_slice_lower-depth.pdf")
-#
-# 	depth = depths[n//2]
-# 	for i, relative_lower_threshold in enumerate(relative_lower_thresholds):
-# 		for j, relative_upper_threshold in enumerate(relative_upper_thresholds):
-# 			if j == n//2: pass
-# 			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-# 			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-# 	plot_objective_space_slice(
-# 		relative_lower_thresholds, relative_upper_thresholds, signal_sensitivities, background_sensitivities,
-# 		"Relative lower threshold (MeV)", "Relative upper threshold (MeV)")
-# 	plt.savefig("figures/objective_slice_lower-upper.pdf")
-#
-# 	plt.close("all")
-#
-#
-# def plot_objective_space_slice(x, y, signal_sensitivities, background_sensitivities, x_label, y_label):
-# 	fig = plt.figure()
-# 	ax = fig.add_subplot()
-# 	vmin = quantile(background_sensitivities[background_sensitivities > 0], .1)/6
-# 	vmax = nanmax(background_sensitivities)
-# 	mesh = ax.contourf(
-# 		x, y, background_sensitivities.T, locator=LogLocator(),
-# 		levels=geomspace(vmin, vmax, 21),
-# 	)
-# 	mesh.set_edgecolor("face")
-# 	contours = ax.contour(x, y, signal_sensitivities, levels=[0.25, 0.5, 0.75, 0.875], colors="k")
-# 	ax.clabel(contours)
-# 	ax.set_xlabel(x_label)
-# 	ax.set_ylabel(y_label)
-# 	plt.colorbar(mesh, ticks=LogLocator().tick_values(vmin, vmax), extend="min").set_label("Background sensitivity")
-# 	fig.tight_layout()
+def test_objective_space():
+	n = 9
+	material = "EJ-276D"
+
+	widths = linspace(0.1, 5.0, n)
+	depths = linspace(0.1, 10.0, n)
+	relative_lower_thresholds = linspace(-6., 0., n)
+	relative_upper_thresholds = linspace(0., 3., n)
+
+	signal_sensitivities = empty((n, n))
+	background_sensitivities = empty((n, n))
+
+	relative_lower_threshold = relative_lower_thresholds[n//2]
+	relative_upper_threshold = relative_upper_thresholds[n//2]
+	for i, width in enumerate(widths):
+		for j, depth in enumerate(depths):
+			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
+			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
+	plot_objective_space_slice(
+		widths, depths, signal_sensitivities, background_sensitivities,
+		"Width (cm)", "Depth (cm)")
+	plt.savefig("figures/objective_slice_width-depth.pdf")
+
+	width = widths[n//2]
+	for i, relative_lower_threshold in enumerate(relative_lower_thresholds):
+		if i == n//2: pass
+		for j, depth in enumerate(depths):
+			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
+			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
+	plot_objective_space_slice(
+		relative_lower_thresholds, depths, signal_sensitivities, background_sensitivities,
+		"Relative lower threshold (MeV)", "Depth (cm)")
+	plt.savefig("figures/objective_slice_lower-depth.pdf")
+
+	depth = depths[n//2]
+	for i, relative_lower_threshold in enumerate(relative_lower_thresholds):
+		for j, relative_upper_threshold in enumerate(relative_upper_thresholds):
+			if j == n//2: pass
+			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
+			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
+	plot_objective_space_slice(
+		relative_lower_thresholds, relative_upper_thresholds, signal_sensitivities, background_sensitivities,
+		"Relative lower threshold (MeV)", "Relative upper threshold (MeV)")
+	plt.savefig("figures/objective_slice_lower-upper.pdf")
+
+	plt.close("all")
+
+
+def plot_objective_space_slice(x, y, signal_sensitivities, background_sensitivities, x_label, y_label):
+	fig = plt.figure()
+	ax = fig.add_subplot()
+	vmin = quantile(background_sensitivities[background_sensitivities > 0], .1)/6
+	vmax = nanmax(background_sensitivities)
+	mesh = ax.contourf(
+		x, y, background_sensitivities.T, locator=LogLocator(),
+		levels=geomspace(vmin, vmax, 21),
+	)
+	mesh.set_edgecolor("face")
+	contours = ax.contour(x, y, signal_sensitivities, levels=[0.25, 0.5, 0.75, 0.875], colors="k")
+	ax.clabel(contours)
+	ax.set_xlabel(x_label)
+	ax.set_ylabel(y_label)
+	plt.colorbar(mesh, ticks=LogLocator().tick_values(vmin, vmax), extend="min").set_label("Background sensitivity")
+	fig.tight_layout()
 
 
 if __name__ == "__main__":
