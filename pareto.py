@@ -19,6 +19,8 @@ logging.basicConfig(
 	level=logging.DEBUG, filename="results/out.log", encoding="utf-8",
 	datefmt="%m-%d %H:%M:%S", format="%(asctime)s %(levelname)-5.5s %(message)s")
 logging.getLogger().addHandler(logging.StreamHandler())
+logging.getLogger("PIL").setLevel(logging.WARNING)
+plt.set_loglevel(level="warning")
 
 
 LENGTH = 10  # cm
