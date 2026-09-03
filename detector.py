@@ -17,9 +17,10 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 	calculate the fraction of these incident particles that are detected by this detector and by adjacent detectors
 	:return: the direct sensitivity, the direct sensitivity uncertainty, the cross-talk sensitivity, and the cross-talk sensitivity uncertainty
 	"""
-	cache_key = (f"{detector.material_name}, {detector.width}, {detector.depth}, "
-	             f"{detector.lower_threshold}, {detector.upper_threshold}, "
-	             f"{beam.particle_name}, {beam.energy}, {beam.diameter}, {beam.width}, {beam.height}, {beam.distance}, {beam.shape}")
+	cache_key = (f"{detector.material_name}, {detector.width:.12g}, {detector.depth:.12g}, "
+	             f"{detector.lower_threshold:.12g}, {detector.upper_threshold:.12g}, "
+	             f"{beam.particle_name}, {beam.energy}, {beam.diameter:.12g}, "
+	             f"{beam.width:.12g}, {beam.height:.12g}, {beam.distance:.12g}, {beam.shape}")
 	if use_cache:
 		# first, try to load it from the cache
 		try:
