@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 from numpy import pi, inf, array, linspace, savetxt, loadtxt, sqrt, concatenate, stack, zeros, full, interp, isclose, \
 	quantile, nanmax, geomspace, empty
-from scipy import optimize, integrate
+from scipy import optimize
 
 from data import MATERIAL_DATA
 from detector import calculate_sensitivity, Detector, calculate_response
@@ -160,13 +160,10 @@ def find_pareto_front(material: str, optimistic: bool) -> list[tuple[float, floa
 			raise FileNotFoundError("you have to calculate the conservative pareto front before you can calculate the optimistic pareto front.")
 		results = []
 		for width, depth, lower_threshold, upper_threshold, _, signal_sensitivity in parameters:
-			expected_energy = csda_deposition(material, INCIDENT_ENERGY, depth)
-			relative_lower_threshold = lower_threshold - expected_energy
-			relative_upper_threshold = upper_threshold - expected_energy
 			coincidence_subtraction = True
 			pulse_shape_discrimination = material.startswith("EJ")
 			background_sensitivity = calculate_background_sensitivity(
-				material, width, depth, relative_lower_threshold, relative_upper_threshold,
+				material, width, depth, lower_threshold, upper_threshold,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_subtraction)
@@ -207,13 +204,16 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 					optimize.NonlinearConstraint(
 						lambda x: calculate_signal_sensitivity(material, *x),  # for a given signal sensitivity
 						lb=min_sensitivity, ub=inf),
+					optimize.LinearConstraint(
+						[0, 0, -1, 1],
+						lb=0, keep_feasible=True),
 				],
-				x0=[1.5, initial_depth, -1.0, 1.0],
+				x0=[1.5, initial_depth, 8.0, 16.0],
 				bounds=[
 					(0.1, 5.0),
 					(0.1, 10.0),
-					(-10., 0.),
-					(0., 10.),
+					(0., 16.75),
+					(0., 16.75),
 				],
 				method="cobyqa",
 				options=dict(
@@ -224,7 +224,7 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 			logging.debug(f"starting with {initial_depth} cm after {new_result.nfev} steps we ended up at {new_result.x[1]:.3g} cm for ({calculate_signal_sensitivity(material, *new_result.x):.3g}, {new_result.fun:.3g})")
 			if result is None or new_result.fun < result.fun:
 				result = new_result
-		width, depth, relative_lower_threshold, relative_upper_threshold = result.x
+		width, depth, lower_threshold, upper_threshold = result.x
 
 	else:
 		# optimize with fixed thickness
@@ -235,12 +235,15 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 				optimize.NonlinearConstraint(
 					lambda x: calculate_signal_sensitivity(material, x[0], depth, x[1], x[2]),  # for a given signal sensitivity
 					lb=min_sensitivity, ub=inf),
+				optimize.LinearConstraint(
+					[0, -1, 1],
+					lb=0, keep_feasible=True),
 			],
-			x0=[1.5, -1.0, 1.0],
+			x0=[1.5, 8.0, 16.0],
 			bounds=[
 				(0.1, 5.0),
-				(-10., 0.),
-				(0., 10.),
+				(0., 16.75),
+				(0., 16.75),
 			],
 			method="cobyqa",
 			options=dict(
@@ -248,29 +251,24 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 				final_tr_radius=1.e-4,
 			),
 		)
-		width, relative_lower_threshold, relative_upper_threshold = result.x
+		width, lower_threshold, upper_threshold = result.x
 
 	print(result)
-	signal_sensitivity = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-	expected_energy = csda_deposition(material, INCIDENT_ENERGY, depth)
-	lower_threshold = expected_energy + relative_lower_threshold
-	upper_threshold = expected_energy + relative_upper_threshold
+	signal_sensitivity = calculate_signal_sensitivity(material, width, depth, lower_threshold, upper_threshold)
 	return width, depth, lower_threshold, upper_threshold, result.fun, signal_sensitivity
 
 
 def calculate_signal_sensitivity(
-		material: str, width: float, depth: float, relative_lower_threshold: float, relative_upper_threshold: float
+		material: str, width: float, depth: float, lower_threshold: float, upper_threshold: float
 ) -> float:
 	"""
 	the detection efficiency of this detector assuming the beam is shaped to the detector
 	"""
 	width = max(0.001, width)
 	depth = max(0.001, depth)
-	expected_energy = csda_deposition(material, INCIDENT_ENERGY, depth)
 	detector = Detector(
 		material=material, width=width, depth=depth, length=LENGTH,
-		lower_threshold=expected_energy + relative_lower_threshold,
-		upper_threshold=expected_energy + relative_upper_threshold)
+		lower_threshold=lower_threshold, upper_threshold=upper_threshold)
 	beam = Beam("electron", MONOENERGETIC_SPECTRUM, width=width, height=LENGTH, shape="rectangular")
 	signal_sensitivity, signal_sensitivity_unc, _, _ = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True)
 
@@ -285,7 +283,7 @@ def calculate_signal_sensitivity(
 
 
 def calculate_background_sensitivity(
-		material: str, width: float, depth: float, relative_lower_threshold: float, relative_upper_threshold: float,
+		material: str, width: float, depth: float, lower_threshold: float, upper_threshold: float,
 		include_neutrons=True, include_photons=True, include_crosstalk=True,
 ) -> float:
 	"""
@@ -293,11 +291,9 @@ def calculate_background_sensitivity(
 	"""
 	width = max(0.001, width)
 	depth = max(0.001, depth)
-	expected_energy = csda_deposition(material, INCIDENT_ENERGY, depth)
 	detector = Detector(
 		material=material, width=width, depth=depth, length=LENGTH,
-		lower_threshold=expected_energy + relative_lower_threshold,
-		upper_threshold=expected_energy + relative_upper_threshold)
+		lower_threshold=lower_threshold, upper_threshold=upper_threshold)
 	world_radius = sqrt((3*width)**2 + depth**2 + detector.length**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_NEUTRON_SPECTRUM, distance=world_radius, shape="ambient")
 	photon_beam = Beam("photon", BACKGROUND_PHOTON_SPECTRUM, distance=world_radius, shape="ambient")
@@ -328,45 +324,8 @@ def calculate_background_sensitivity(
 	return total_detection_rate
 
 
-def csda_deposition(material: str, initial_energy: float, distance: float) -> float:
-	"""
-	calculate the average amount of energy deposited by an electron given its initial energy and the distance it travels
-	:param material: the material name
-	:param initial_energy: the incident energy (MeV)
-	:param distance: the distance it travels (cm)
-	:return: the difference between the initial and final energy (MeV)
-	"""
-	# first, make sure the preintegrated range curve is stored in memory
-	if "CSDA_data" not in MATERIAL_DATA[material]:
-		# load the ESTAR data
-		slowing_data = loadtxt(f"data/{material}_estar.txt", skiprows=8)
-		density = MATERIAL_DATA[material]["density"]  # g/cm³
-		energy = slowing_data[:, 0]  # MeV
-		stopping_power = slowing_data[:, 1]*density  # MeV/cm
-		# add an infinity to the bottom of the stopping table so that behavior is defined down to E=0
-		E = concatenate([[0], energy])  # MeV
-		dE_dx = concatenate([[inf], stopping_power])  # MeV/cm
-		# do the integral
-		dx_dE = 1 / dE_dx  # m/MeV
-		x = integrate.cumulative_trapezoid(x=E, y=dx_dE, initial=0)  # m
-		MATERIAL_DATA[material]["CSDA_data"] = (E, x)
-
-	# then we can calculate the energy loss with two interpolations
-	energy_table, range_table = MATERIAL_DATA[material]["CSDA_data"]
-	initial_range = interp(initial_energy, energy_table, range_table)
-	final_range = max(0, initial_range - distance)
-	final_energy = interp(final_range, range_table, energy_table)
-	return initial_energy - final_energy
-
-
 def test_plot_responses():
 	plot_responses(Detector("EJ-276D", width=2, depth=5, lower_threshold=5, upper_threshold=17))
-
-
-def test_csda_deposition():
-	assert csda_deposition("silicon", 16.7, 0.0) == 0
-	assert csda_deposition("silicon", 16.7, 4.0) == 16.7
-	assert isclose(csda_deposition("silicon", 16.7, 0.1), 0.541, rtol=0.1)
 
 
 def test_exclusive_detector():
@@ -383,42 +342,42 @@ def test_objective_space():
 
 	widths = linspace(0.1, 5.0, n)
 	depths = linspace(0.1, 10.0, n)
-	relative_lower_thresholds = linspace(-6., 0., n)
-	relative_upper_thresholds = linspace(0., 3., n)
+	lower_thresholds = linspace(0., 10., n)
+	upper_thresholds = linspace(10.75, 16.75, n)
 
 	signal_sensitivities = empty((n, n))
 	background_sensitivities = empty((n, n))
 
-	relative_lower_threshold = relative_lower_thresholds[n//2]
-	relative_upper_threshold = relative_upper_thresholds[n//2]
+	lower_threshold = lower_thresholds[n//2]
+	upper_threshold = upper_thresholds[n//2]
 	for i, width in enumerate(widths):
 		for j, depth in enumerate(depths):
-			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
+			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, lower_threshold, upper_threshold)
+			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, lower_threshold, upper_threshold)
 	plot_objective_space_slice(
 		widths, depths, signal_sensitivities, background_sensitivities,
 		"Width (cm)", "Depth (cm)")
 	plt.savefig("figures/objective_slice_width-depth.pdf")
 
 	width = widths[n//2]
-	for i, relative_lower_threshold in enumerate(relative_lower_thresholds):
+	for i, lower_threshold in enumerate(lower_thresholds):
 		if i == n//2: pass
 		for j, depth in enumerate(depths):
-			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
+			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, lower_threshold, upper_threshold)
+			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, lower_threshold, upper_threshold)
 	plot_objective_space_slice(
-		relative_lower_thresholds, depths, signal_sensitivities, background_sensitivities,
+		lower_thresholds, depths, signal_sensitivities, background_sensitivities,
 		"Relative lower threshold (MeV)", "Depth (cm)")
 	plt.savefig("figures/objective_slice_lower-depth.pdf")
 
 	depth = depths[n//2]
-	for i, relative_lower_threshold in enumerate(relative_lower_thresholds):
-		for j, relative_upper_threshold in enumerate(relative_upper_thresholds):
+	for i, lower_threshold in enumerate(lower_thresholds):
+		for j, upper_threshold in enumerate(upper_thresholds):
 			if j == n//2: pass
-			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
-			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, relative_lower_threshold, relative_upper_threshold)
+			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, lower_threshold, upper_threshold)
+			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, lower_threshold, upper_threshold)
 	plot_objective_space_slice(
-		relative_lower_thresholds, relative_upper_thresholds, signal_sensitivities, background_sensitivities,
+		lower_thresholds, upper_thresholds, signal_sensitivities, background_sensitivities,
 		"Relative lower threshold (MeV)", "Relative upper threshold (MeV)")
 	plt.savefig("figures/objective_slice_lower-upper.pdf")
 
