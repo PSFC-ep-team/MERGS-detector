@@ -274,7 +274,7 @@ def calculate_signal_sensitivity(
 	beam = Beam("electron", MONOENERGETIC_SPECTRUM, width=width, height=LENGTH, shape="rectangular")
 	signal_sensitivity, signal_sensitivity_unc, _, _ = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True)
 
-	if signal_sensitivity_unc > .10*signal_sensitivity:
+	if signal_sensitivity_unc > .20*signal_sensitivity:
 		logging.warning(
 			f"when calculating the sensitivity of a {detector.width:.2g}×{detector.depth:.2g} cm "
 			f"{detector.material_name} detector to signal electrons, counting only particles between "
