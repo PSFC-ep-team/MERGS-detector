@@ -250,6 +250,19 @@ def calculate_thresholds(
 	"""
 	the thresholds that achieve the given percentiles
 	"""
+	cache_key = (f"{material}, {width:.12g}, {depth:.12g}, "
+	             f"{lower_percentile:.12g}, {upper_percentile:.12g}, thresholds")
+	# first, try to load it from the cache
+	try:
+		with open("results/cache.txt", mode="r") as file:
+			for line in file.readlines():
+				input_string, output_string = line.split(" -> ")
+				if input_string == cache_key:
+					results = output_string.split(",")
+					return tuple(float(x) for x in results)
+	except FileNotFoundError:
+		pass
+
 	width = max(0.001, width)
 	depth = max(0.001, depth)
 	detector = Detector(
@@ -272,6 +285,10 @@ def calculate_thresholds(
 			x0=percentile(energies, percentile_value),
 		)
 		thresholds.append(threshold)
+
+	os.makedirs("results", exist_ok=True)
+	with open("results/cache.txt", mode="a") as file:
+		file.write(f"{cache_key} -> {thresholds[0]}, {thresholds[1]}\n")
 	return tuple(thresholds)
 
 
