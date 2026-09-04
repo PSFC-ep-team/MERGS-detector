@@ -412,7 +412,7 @@ def plot_objective_space_slice(x, y, signal_sensitivities, background_sensitivit
 		levels=geomspace(vmin, vmax, 21),
 	)
 	mesh.set_edgecolor("face")
-	contours = ax.contour(x, y, signal_sensitivities, levels=[0.25, 0.5, 0.75, 0.875], colors="k")
+	contours = ax.contour(x, y, signal_sensitivities.T, levels=[0.25, 0.5, 0.75, 0.875], colors="k")
 	ax.clabel(contours)
 	ax.set_xlabel(x_label)
 	ax.set_ylabel(y_label)
