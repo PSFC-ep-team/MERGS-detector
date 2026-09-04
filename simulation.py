@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from typing import Literal
 import xml.etree.ElementTree as xml
 
+from filelock import FileLock, Timeout
 from numpy import genfromtxt, savetxt, concatenate, sin, cos, array, stack, interp, isclose, hypot, count_nonzero, diff, \
 	unique, nonzero
 from numpy.typing import NDArray
@@ -145,27 +147,41 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	# and then whatever this is
 	xml.SubElement(setup, "world", ref="world_log")
 
-	# write to disc
-	tree = xml.ElementTree(input_deck)
-	xml.indent(tree)
-	tree.write("run/input.gdml", xml_declaration=True, encoding="UTF-8")
-
-	# clear previus output
+	# lock down the run directory
+	lock = FileLock("run.lock")
 	try:
-		os.remove("run/output.dat")
-	except FileNotFoundError:
-		pass
+		lock.acquire(blocking=False)
+	except Timeout:
+		logging.warning("uh, are you aware that someone else is running Grasshopper right now?  the code isn't made to be multiprocessed, so you're just pointlessly slowing yourself down.")
+		lock.acquire()  # block for as long as it takes
 
-	# call the executable
-	print(f"Simulating {num_particles} {beam.particle_name}s...", end=" ")
-	subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run/", stdout=subprocess.DEVNULL)
-	print(f"done!")
-
-	# read the output
 	try:
-		output_data = genfromtxt("run/output.dat", names=True, comments=None)
-	except FileNotFoundError:
-		raise RuntimeError("Geant4 failed to run.")
+		# write to disc
+		tree = xml.ElementTree(input_deck)
+		xml.indent(tree)
+		tree.write("run/input.gdml", xml_declaration=True, encoding="UTF-8")
+
+		# clear previus output
+		try:
+			os.remove("run/output.dat")
+		except FileNotFoundError:
+			pass
+
+		# call the executable
+		print(f"Simulating {num_particles} {beam.particle_name}s...", end=" ")
+		subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run/", stdout=subprocess.DEVNULL)
+		print(f"done!")
+
+		# read the output
+		try:
+			output_data = genfromtxt("run/output.dat", names=True, comments=None)
+		except FileNotFoundError:
+			raise RuntimeError("Geant4 failed to run.")
+
+	# release the run directory
+	finally:
+		lock.release()
+
 	# convert mm to cm
 	output_data["x_incident"] /= 10
 	output_data["y_incident"] /= 10
