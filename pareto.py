@@ -1,11 +1,13 @@
 import os
 import logging
+from typing import Callable
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
-from numpy import pi, inf, array, linspace, savetxt, loadtxt, sqrt, concatenate, stack, zeros, full, interp, isclose, \
-	quantile, nanmax, geomspace, empty
+from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, stack, zeros, full, interp, \
+	quantile, nanmax, geomspace, empty, percentile
 from scipy import optimize
+from scipy.special import erf
 
 from data import MATERIAL_DATA
 from detector import calculate_sensitivity, Detector, calculate_response
@@ -189,7 +191,7 @@ def find_pareto_front(material: str, optimistic: bool) -> list[tuple[float, floa
 	return results
 
 
-def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, float, float, float, float, float]:
+def optimize_detector(material: str, signal_sensitivity: float) -> tuple[float, float, float, float, float, float]:
 	"""
 	get the optimal dimensions and thresholds for a detector of the given material with at least the given signal sensitivity
 	:return: the width (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity, and the achieved signal sensitivity
@@ -199,21 +201,12 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 		result = None
 		for initial_depth in [0.6, 5.0]:
 			new_result = optimize.minimize(
-				lambda x: calculate_background_sensitivity(material, *x),  # find the lowest background sensitivity
-				constraints=[
-					optimize.NonlinearConstraint(
-						lambda x: calculate_signal_sensitivity(material, *x),  # for a given signal sensitivity
-						lb=min_sensitivity, ub=inf),
-					optimize.LinearConstraint(
-						[0, 0, -1, 1],
-						lb=0, keep_feasible=True),
-				],
-				x0=[1.5, initial_depth, 8.0, 16.0],
+				lambda x: calculate_background_sensitivity(material, x[0], x[1], x[2], x[2] + 100*signal_sensitivity),  # find the lowest background sensitivity
+				x0=[1.5, initial_depth, 50.*(1 - signal_sensitivity)],
 				bounds=[
 					(0.1, 5.0),
 					(0.1, 10.0),
-					(0., 16.75),
-					(0., 16.75),
+					(0., 100.*(1 - signal_sensitivity)),
 				],
 				method="cobyqa",
 				options=dict(
@@ -221,29 +214,20 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 					final_tr_radius=1.e-4,
 				),
 			)
-			logging.debug(f"starting with {initial_depth} cm after {new_result.nfev} steps we ended up at {new_result.x[1]:.3g} cm for ({calculate_signal_sensitivity(material, *new_result.x):.3g}, {new_result.fun:.3g})")
+			logging.debug(f"starting with {initial_depth} cm after {new_result.nfev} steps we ended up at {new_result.x[1]:.3g} cm for ({new_result.fun:.3g})")
 			if result is None or new_result.fun < result.fun:
 				result = new_result
-		width, depth, lower_threshold, upper_threshold = result.x
+		width, depth, lower_percentile = result.x
 
 	else:
 		# optimize with fixed thickness
 		depth = 0.1
 		result = optimize.minimize(
-			lambda x: calculate_background_sensitivity(material, x[0], depth, x[1], x[2]),  # find the lowest background sensitivity
-			constraints=[
-				optimize.NonlinearConstraint(
-					lambda x: calculate_signal_sensitivity(material, x[0], depth, x[1], x[2]),  # for a given signal sensitivity
-					lb=min_sensitivity, ub=inf),
-				optimize.LinearConstraint(
-					[0, -1, 1],
-					lb=0, keep_feasible=True),
-			],
-			x0=[1.5, 8.0, 16.0],
+			lambda x: calculate_background_sensitivity(material, x[0], depth, x[1], x[1] + 100*signal_sensitivity),  # find the lowest background sensitivity
+			x0=[1.5, 50.*(1 - signal_sensitivity)],
 			bounds=[
 				(0.1, 5.0),
-				(0., 16.75),
-				(0., 16.75),
+				(0., 100.*(1 - signal_sensitivity)),
 			],
 			method="cobyqa",
 			options=dict(
@@ -251,39 +235,47 @@ def optimize_detector(material: str, min_sensitivity: float) -> tuple[float, flo
 				final_tr_radius=1.e-4,
 			),
 		)
-		width, lower_threshold, upper_threshold = result.x
+		width, lower_percentile = result.x
+	upper_percentile = lower_percentile + 100*signal_sensitivity
 
 	print(result)
-	signal_sensitivity = calculate_signal_sensitivity(material, width, depth, lower_threshold, upper_threshold)
+	lower_threshold, upper_threshold = calculate_thresholds(material, width, depth, lower_percentile, upper_percentile)
 	return width, depth, lower_threshold, upper_threshold, result.fun, signal_sensitivity
 
 
-def calculate_signal_sensitivity(
-		material: str, width: float, depth: float, lower_threshold: float, upper_threshold: float
-) -> float:
+def calculate_thresholds(
+		material: str, width: float, depth: float, lower_percentile: float, upper_percentile: float
+) -> tuple[float, float]:
 	"""
-	the detection efficiency of this detector assuming the beam is shaped to the detector
+	the thresholds that achieve the given percentiles
 	"""
 	width = max(0.001, width)
 	depth = max(0.001, depth)
 	detector = Detector(
-		material=material, width=width, depth=depth, length=LENGTH,
-		lower_threshold=lower_threshold, upper_threshold=upper_threshold)
+		material=material, width=width, depth=depth, length=LENGTH)
 	beam = Beam("electron", MONOENERGETIC_SPECTRUM, width=width, height=LENGTH, shape="rectangular")
-	signal_sensitivity, signal_sensitivity_unc, _, _ = calculate_sensitivity(detector, beam, num_particles=100_000, use_cache=True)
+	energies, _, _ = calculate_response(detector, beam, num_particles=100_000)
+	efficiency = MATERIAL_DATA[material]["efficiency"]
 
-	if signal_sensitivity_unc > .20*signal_sensitivity:
-		logging.warning(
-			f"when calculating the sensitivity of a {detector.width:.2g}×{detector.depth:.2g} cm "
-			f"{detector.material_name} detector to signal electrons, counting only particles between "
-			f"{detector.lower_threshold:.2g} and {detector.upper_threshold:.2g} MeV, we got an unacceptably "
-			f"uncertain anser of {signal_sensitivity:.3g} ± {signal_sensitivity_unc:.3g}.")
+	def fraction_below(threshold):
+		energy_uncertainty = sqrt(energies/efficiency)
+		score = (threshold - energies)/energy_uncertainty
+		probability_below = 1/2 + 1/2*erf(score/sqrt(2))  # approximate the Poisson distribution as Gaussian so that it's continuus
+		return probability_below.sum()/energies.size
 
-	return signal_sensitivity
+	thresholds = []
+	for percentile_value in [lower_percentile, upper_percentile]:
+		threshold = find_root(
+			lambda threshold: 100*fraction_below(threshold) - percentile_value,
+			bracket=(0.0, 17.0),
+			x0=percentile(energies, percentile_value),
+		)
+		thresholds.append(threshold)
+	return tuple(thresholds)
 
 
 def calculate_background_sensitivity(
-		material: str, width: float, depth: float, lower_threshold: float, upper_threshold: float,
+		material: str, width: float, depth: float, lower_percentile: float, upper_percentile: float,
 		include_neutrons=True, include_photons=True, include_crosstalk=True,
 ) -> float:
 	"""
@@ -291,6 +283,7 @@ def calculate_background_sensitivity(
 	"""
 	width = max(0.001, width)
 	depth = max(0.001, depth)
+	lower_threshold, upper_threshold = calculate_thresholds(material, width, depth, lower_percentile, upper_percentile)
 	detector = Detector(
 		material=material, width=width, depth=depth, length=LENGTH,
 		lower_threshold=lower_threshold, upper_threshold=upper_threshold)
@@ -324,16 +317,41 @@ def calculate_background_sensitivity(
 	return total_detection_rate
 
 
+def find_root(f: Callable[[float], float], bracket: tuple[float, float], x0: float, **kwargs) -> float:
+	"""
+	it's like Scipy's quadratic Brent root-finding algorithm but it takes an initial gess,
+	and returns the bounds if it seems out of bounds.
+	and it assumes that the function is monotonicly increasing.
+	"""
+	if bracket[0] >= bracket[1]:
+		raise ValueError(f"the bounds must be ascending, not {bracket}.")
+	if x0 < bracket[0] or x0 > bracket[1]:
+		raise ValueError(f"the initial gess {x0} is not in the feasible range {bracket}.")
+	# check the bounds to make sure there's actually a root in this bracket
+	left, right = bracket
+	if f(left) >= 0:
+		return left
+	if f(right) <= 0:
+		return right
+	# shift x0 a bit if it's redundant with one of the bounds
+	if x0 == left:
+		x0 = 0.9*left + 0.1*right
+	elif x0 == right:
+		x0 = 0.1*left + 0.9*right
+	# change one of the bounds to x0 to incorporate the initial gess into the search
+	y0 = f(x0)
+	if y0 < 0:
+		left = x0
+	elif y0 > 0:
+		right = x0
+	else:
+		return x0
+	# run Scipy's secant algorithm
+	return optimize.root_scalar(f, bracket=(left, right), **kwargs).root
+
+
 def test_plot_responses():
 	plot_responses(Detector("EJ-276D", width=2, depth=5, lower_threshold=5, upper_threshold=17))
-
-
-def test_exclusive_detector():
-	assert calculate_signal_sensitivity("EJ-276D", 2, 5, -0.1, +0.1) < 0.1
-
-
-def test_thin_detector():
-	assert calculate_signal_sensitivity("EJ-276D", 1, 0.1, -0.2, +0.4) > 0.90
 
 
 def test_objective_space():
@@ -342,43 +360,43 @@ def test_objective_space():
 
 	widths = linspace(0.1, 5.0, n)
 	depths = linspace(0.1, 10.0, n)
-	lower_thresholds = linspace(0., 10., n)
-	upper_thresholds = linspace(10.75, 16.75, n)
+	lower_percentiles = linspace(0., 50., n)
+	upper_percentiles = linspace(50., 100., n)
 
 	signal_sensitivities = empty((n, n))
 	background_sensitivities = empty((n, n))
 
-	lower_threshold = lower_thresholds[n//2]
-	upper_threshold = upper_thresholds[n//2]
+	lower_percentile = lower_percentiles[n//2]
+	upper_percentile = upper_percentiles[n//2]
 	for i, width in enumerate(widths):
 		for j, depth in enumerate(depths):
-			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, lower_threshold, upper_threshold)
-			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, lower_threshold, upper_threshold)
+			signal_sensitivities[i, j] = (upper_percentile - lower_percentile)/100
+			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, lower_percentile, upper_percentile)
 	plot_objective_space_slice(
 		widths, depths, signal_sensitivities, background_sensitivities,
 		"Width (cm)", "Depth (cm)")
 	plt.savefig("figures/objective_slice_width-depth.pdf")
 
 	width = widths[n//2]
-	for i, lower_threshold in enumerate(lower_thresholds):
+	for i, lower_percentile in enumerate(lower_percentiles):
 		if i == n//2: pass
 		for j, depth in enumerate(depths):
-			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, lower_threshold, upper_threshold)
-			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, lower_threshold, upper_threshold)
+			signal_sensitivities[i, j] = (upper_percentile - lower_percentile)/100
+			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, lower_percentile, upper_percentile)
 	plot_objective_space_slice(
-		lower_thresholds, depths, signal_sensitivities, background_sensitivities,
-		"Relative lower threshold (MeV)", "Depth (cm)")
+		lower_percentiles, depths, signal_sensitivities, background_sensitivities,
+		"Lower threshold (%)", "Depth (cm)")
 	plt.savefig("figures/objective_slice_lower-depth.pdf")
 
 	depth = depths[n//2]
-	for i, lower_threshold in enumerate(lower_thresholds):
-		for j, upper_threshold in enumerate(upper_thresholds):
+	for i, lower_percentile in enumerate(lower_percentiles):
+		for j, upper_percentile in enumerate(upper_percentiles):
 			if j == n//2: pass
-			signal_sensitivities[i, j] = calculate_signal_sensitivity(material, width, depth, lower_threshold, upper_threshold)
-			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, lower_threshold, upper_threshold)
+			signal_sensitivities[i, j] = (upper_percentile - lower_percentile)/100
+			background_sensitivities[i, j] = calculate_background_sensitivity(material, width, depth, lower_percentile, upper_percentile)
 	plot_objective_space_slice(
-		lower_thresholds, upper_thresholds, signal_sensitivities, background_sensitivities,
-		"Relative lower threshold (MeV)", "Relative upper threshold (MeV)")
+		lower_percentiles, upper_percentiles, signal_sensitivities, background_sensitivities,
+		"Lower threshold (%)", "Upper threshold (%)")
 	plt.savefig("figures/objective_slice_lower-upper.pdf")
 
 	plt.close("all")
