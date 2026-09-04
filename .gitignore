@@ -3,4 +3,5 @@ __pycache__/*
 run/*
 figures/*
 results/*
+run.lock
 slurm-*.out
