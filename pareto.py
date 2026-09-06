@@ -207,7 +207,7 @@ def optimize_detector(material: str, signal_sensitivity: float) -> tuple[float, 
 				bounds=[
 					(0.1, 5.0),
 					(0.1, 10.0),
-					(0., 100.*(1 - signal_sensitivity)),
+					(1., 100.*(1 - signal_sensitivity)),
 				],
 				method="cobyqa",
 				options=dict(
@@ -378,7 +378,7 @@ def test_objective_space():
 
 	widths = linspace(0.1, 5.0, n)
 	depths = linspace(0.1, 10.0, n)
-	lower_percentiles = linspace(0., 50., n)
+	lower_percentiles = linspace(1., 50., n)
 	upper_percentiles = linspace(50., 100., n)
 
 	signal_sensitivities = empty((n, n))
