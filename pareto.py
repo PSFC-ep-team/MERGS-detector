@@ -29,7 +29,7 @@ logging.getLogger("PIL").setLevel(logging.WARNING)
 LENGTH = 10  # cm
 INCIDENT_ENERGY = 16.7
 MONOENERGETIC_SPECTRUM = Spectrum("16.5–16.9", array([INCIDENT_ENERGY - 0.2, INCIDENT_ENERGY + 0.2]), array([1., 1.]))
-BACKGROUND_FLUENCE = 1e+1  # particle/cm²/electron
+BACKGROUND_FLUENCE = 1e+2  # particle/cm²/electron
 
 data = loadtxt("data/background-spectrum.csv", skiprows=1, delimiter=",", quotechar='"')
 BACKGROUND_NEUTRON_SPECTRUM = Spectrum(
@@ -199,25 +199,21 @@ def optimize_detector(material: str, signal_sensitivity: float) -> tuple[float, 
 	"""
 	if material != "silicon":
 		# optimize with freely varying thickness
-		result = None
-		for initial_depth in [0.6, 5.0]:
-			new_result = optimize.minimize(
-				lambda x: calculate_background_sensitivity(material, x[0], x[1], x[2], x[2] + 100*signal_sensitivity),  # find the lowest background sensitivity
-				x0=[1.5, initial_depth, 50.*(1 - signal_sensitivity)],
-				bounds=[
-					(0.1, 5.0),
-					(0.1, 10.0),
-					(1., 100.*(1 - signal_sensitivity)),
-				],
-				method="cobyqa",
-				options=dict(
-					initial_tr_radius=0.5,
-					final_tr_radius=1.e-4,
-				),
-			)
-			logging.debug(f"starting with {initial_depth} cm after {new_result.nfev} steps we ended up at {new_result.x[1]:.3g} cm for ({new_result.fun:.3g})")
-			if result is None or new_result.fun < result.fun:
-				result = new_result
+		result = optimize.minimize(
+			lambda x: calculate_background_sensitivity(material, x[0], x[1], x[2], x[2] + 100*signal_sensitivity),  # find the lowest background sensitivity
+			x0=[1.5, 1.0, 50.*(1 - signal_sensitivity)],
+			bounds=[
+				(0.1, 5.0),
+				(0.1, 10.0),
+				(1., 100.*(1 - signal_sensitivity)),
+			],
+			method="cobyqa",
+			options=dict(
+				initial_tr_radius=0.5,
+				final_tr_radius=1.e-4,
+			),
+		)
+		logging.debug(f"after {result.nfev} steps we ended up at {result.x[0]:.3g}×{result.x[1]:.3g} cm for ({signal_sensitivity:.3g}, {result.fun:.3g})")
 		width, depth, lower_percentile = result.x
 
 	else:
@@ -236,6 +232,7 @@ def optimize_detector(material: str, signal_sensitivity: float) -> tuple[float, 
 				final_tr_radius=1.e-4,
 			),
 		)
+		logging.debug(f"after {result.nfev} steps we ended up at {result.x[0]:.3g}×0.1 cm for ({signal_sensitivity:.3g}, {result.fun:.3g})")
 		width, lower_percentile = result.x
 	upper_percentile = lower_percentile + 100*signal_sensitivity
 
@@ -268,7 +265,7 @@ def calculate_thresholds(
 	detector = Detector(
 		material=material, width=width, depth=depth, length=LENGTH)
 	beam = Beam("electron", MONOENERGETIC_SPECTRUM, width=width, height=LENGTH, shape="rectangular")
-	energies, _, _ = calculate_response(detector, beam, num_particles=100_000)
+	energies, _, _ = calculate_response(detector, beam, num_particles=1_000_000)
 	efficiency = MATERIAL_DATA[material]["efficiency"]
 
 	def fraction_below(threshold):
@@ -320,7 +317,7 @@ def calculate_background_sensitivity(
 		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity
 		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius*photon_sensitivity_unc)**2
 	if include_crosstalk:
-		_, _, crosstalk_sensitivity, crosstalk_sensitivity_unc = calculate_sensitivity(detector, electron_beam, num_particles=100_000, use_cache=True)
+		_, _, crosstalk_sensitivity, crosstalk_sensitivity_unc = calculate_sensitivity(detector, electron_beam, num_particles=1_000_000, use_cache=True)
 		total_detection_rate += crosstalk_sensitivity
 		total_detection_rate_var += crosstalk_sensitivity_unc**2
 
