@@ -307,8 +307,8 @@ def calculate_background_sensitivity(
 		material=material, width=width, depth=depth, length=LENGTH,
 		lower_threshold=lower_threshold, upper_threshold=upper_threshold)
 	world_radius = sqrt((3*width)**2 + depth**2 + detector.length**2)/2
-	neutron_beam = Beam("neutron", BACKGROUND_NEUTRON_SPECTRUM, distance=world_radius, shape="ambient")
-	photon_beam = Beam("photon", BACKGROUND_PHOTON_SPECTRUM, distance=world_radius, shape="ambient")
+	neutron_beam = Beam("neutron", BACKGROUND_NEUTRON_SPECTRUM, width=width, height=LENGTH, shape="rectangular")
+	photon_beam = Beam("photon", BACKGROUND_PHOTON_SPECTRUM, width=width, height=LENGTH, shape="rectangular")
 	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, width=width, height=LENGTH, shape="rectangular")
 	total_detection_rate = 0.
 	total_detection_rate_var = 0.
@@ -318,12 +318,12 @@ def calculate_background_sensitivity(
 		total_detection_rate_var += crosstalk_sensitivity_unc**2
 	if include_neutrons:
 		neutron_sensitivity, neutron_sensitivity_unc, _, _ = calculate_sensitivity(detector, neutron_beam, num_particles=1_000_000, use_cache=True)
-		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*neutron_sensitivity
-		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius**2*neutron_sensitivity_unc)**2
+		total_detection_rate += BACKGROUND_FLUENCE*width*LENGTH*neutron_sensitivity
+		total_detection_rate_var += (BACKGROUND_FLUENCE*width*LENGTH*neutron_sensitivity_unc)**2
 	if include_photons:
 		photon_sensitivity, photon_sensitivity_unc, _, _ = calculate_sensitivity(detector, photon_beam, num_particles=1_000_000, use_cache=True)
-		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity
-		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity_unc)**2
+		total_detection_rate += BACKGROUND_FLUENCE*width*LENGTH*photon_sensitivity
+		total_detection_rate_var += (BACKGROUND_FLUENCE*width*LENGTH*photon_sensitivity_unc)**2
 
 	total_detection_rate_unc = sqrt(total_detection_rate_var)
 	if total_detection_rate_unc > .10*total_detection_rate:
