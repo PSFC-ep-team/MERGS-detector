@@ -29,7 +29,7 @@ logging.getLogger("PIL").setLevel(logging.WARNING)
 LENGTH = 10  # cm
 INCIDENT_ENERGY = 16.7
 MONOENERGETIC_SPECTRUM = Spectrum("16.5–16.9", array([INCIDENT_ENERGY - 0.2, INCIDENT_ENERGY + 0.2]), array([1., 1.]))
-BACKGROUND_FLUENCE = 1e+2  # particle/cm²/electron
+BACKGROUND_FLUENCE = 1e+4  # particle/cm²/electron
 
 data = loadtxt("data/background-spectrum.csv", skiprows=1, delimiter=",", quotechar='"')
 BACKGROUND_NEUTRON_SPECTRUM = Spectrum(
