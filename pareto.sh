@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --cpus-per-task=7
 #SBATCH --time=11:59:00
 #SBATCH --partition=mit_normal
 #SBATCH --mem-per-cpu=8000

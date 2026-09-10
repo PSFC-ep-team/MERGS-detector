@@ -1,5 +1,6 @@
 import os
 import logging
+from multiprocessing import Pool, cpu_count
 from typing import Callable
 
 import matplotlib.pyplot as plt
@@ -178,18 +179,23 @@ def find_pareto_front(material: str, optimistic: bool) -> list[tuple[float, floa
 		except FileNotFoundError:
 			logging.info(f"starting pareto front calculation for {material}...")
 			signal_sensitivities = 1 - linspace(1, 0, 9)[1:-1]**2
-			results = []
-			for target_signal_sensitivity in signal_sensitivities:
-				width, depth, lower_threshold, upper_threshold, background_sensitivity, signal_sensitivity = optimize_detector(
-					material, target_signal_sensitivity)
-				logging.info(f"found optimum that achieves {signal_sensitivity:.3g} for signal, {background_sensitivity:.3g} for background")
-				results.append((width, depth, lower_threshold, upper_threshold, background_sensitivity, signal_sensitivity))
+			num_processes = min(len(signal_sensitivities), cpu_count())
+			logging.debug(f"running on {num_processes} parallel processes")
+			with Pool(processes=9) as executor:
+				results = executor.map(
+					optimize_detector_star,
+					[(material, sensitivity) for sensitivity in signal_sensitivities],
+				)
 			savetxt(
 				f"results/pareto_{material}.txt", results, delimiter="\t",
 				header="width (cm)\tdepth (cm)\tlower threshold (MeV)\tupper threshold (MeV)\tbackground sensitivity\tsignal_sensitivity\n")
 			logging.info(f"done!  saved to results/pareto_{material}.txt")
 
 	return results
+
+
+def optimize_detector_star(args: tuple[str, float]):
+	return optimize_detector(*args)
 
 
 def optimize_detector(material: str, signal_sensitivity: float) -> tuple[float, float, float, float, float, float]:
@@ -213,7 +219,6 @@ def optimize_detector(material: str, signal_sensitivity: float) -> tuple[float, 
 				final_tr_radius=1.e-4,
 			),
 		)
-		logging.debug(f"after {result.nfev} steps we ended up at {result.x[0]:.3g}×{result.x[1]:.3g} cm for ({signal_sensitivity:.3g}, {result.fun:.3g})")
 		width, depth, lower_percentile = result.x
 
 	else:
@@ -232,11 +237,10 @@ def optimize_detector(material: str, signal_sensitivity: float) -> tuple[float, 
 				final_tr_radius=1.e-4,
 			),
 		)
-		logging.debug(f"after {result.nfev} steps we ended up at {result.x[0]:.3g}×0.1 cm for ({signal_sensitivity:.3g}, {result.fun:.3g})")
 		width, lower_percentile = result.x
 	upper_percentile = lower_percentile + 100*signal_sensitivity
 
-	print(result)
+	logging.info(f"after {result.nfev} steps, we found an optimum that achieves {signal_sensitivity:.3g} for signal, {result.fun:.3g} for background")
 	lower_threshold, upper_threshold = calculate_thresholds(material, width, depth, lower_percentile, upper_percentile)
 	return width, depth, lower_threshold, upper_threshold, result.fun, signal_sensitivity
 
