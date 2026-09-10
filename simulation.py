@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import filecmp
 import logging
 import os
+import shutil
 import subprocess
 from typing import Literal
 import xml.etree.ElementTree as xml
@@ -23,6 +25,14 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	:return: the track data from Grasshopper
 	"""
 	os.makedirs("run", exist_ok=True)
+	# lock down the run directory
+	lock = FileLock("run.lock")
+	try:
+		lock.acquire(blocking=False)
+	except Timeout:
+		logging.warning("uh, are you aware that someone else is running Grasshopper right now?  the code isn't made to be multiprocessed, so you're just pointlessly slowing yourself down.")
+		lock.acquire()  # block for as long as it takes
+
 
 	# start by instantiating the input deck
 	input_deck = xml.Element("gdml", {
@@ -109,6 +119,7 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 		savetxt("run/input_spectrum.txt", stack([beam.energy.energies, beam.energy.probabilities], axis=1))
 		xml.SubElement(definitions, "quantity",
 		               name="BeamEnergy", type="energy", value="-1", unit="MeV")
+		definitions.append(xml.Comment(f'quantity name="BeamSpectrumName" value="{beam.energy.name}"'))
 	else:
 		try:
 			os.remove("run/input_spectrum.txt")
@@ -147,30 +158,32 @@ def simulate(detector_material: str, solids: list[Solid], beam: Beam, num_partic
 	# and then whatever this is
 	xml.SubElement(setup, "world", ref="world_log")
 
-	# lock down the run directory
-	lock = FileLock("run.lock")
-	try:
-		lock.acquire(blocking=False)
-	except Timeout:
-		logging.warning("uh, are you aware that someone else is running Grasshopper right now?  the code isn't made to be multiprocessed, so you're just pointlessly slowing yourself down.")
-		lock.acquire()  # block for as long as it takes
-
 	try:
 		# write to disc
 		tree = xml.ElementTree(input_deck)
 		xml.indent(tree)
-		tree.write("run/input.gdml", xml_declaration=True, encoding="UTF-8")
+		tree.write("run/new_input.gdml", xml_declaration=True, encoding="UTF-8")
 
-		# clear previus output
+		# check if this is the same as the last run
 		try:
-			os.remove("run/output.dat")
+			same_as_it_ever_was = filecmp.cmp("run/new_input.gdml", "run/input.gdml", shallow=False)
 		except FileNotFoundError:
-			pass
+			same_as_it_ever_was = False
+		# if not...
+		if not same_as_it_ever_was:
+			# overwrite previus input
+			shutil.move("run/new_input.gdml", "run/input.gdml")
 
-		# call the executable
-		print(f"Simulating {num_particles} {beam.particle_name}s...", end=" ")
-		subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run/", stdout=subprocess.DEVNULL)
-		print(f"done!")
+			# clear previus output
+			try:
+				os.remove("run/output.dat")
+			except FileNotFoundError:
+				pass
+
+			# call the executable
+			print(f"Simulating {num_particles} {beam.particle_name}s...", end=" ")
+			subprocess.run(["grasshopper", "input.gdml", "output"], cwd="run/", stdout=subprocess.DEVNULL)
+			print(f"done!")
 
 		# read the output
 		try:
