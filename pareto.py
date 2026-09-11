@@ -30,7 +30,7 @@ logging.getLogger("PIL").setLevel(logging.WARNING)
 LENGTH = 10  # cm
 INCIDENT_ENERGY = 16.7
 MONOENERGETIC_SPECTRUM = Spectrum("16.5–16.9", array([INCIDENT_ENERGY - 0.2, INCIDENT_ENERGY + 0.2]), array([1., 1.]))
-BACKGROUND_FLUENCE = 1e+4  # particle/cm²/electron
+BACKGROUND_FLUENCE = 1e+3  # particle/cm²/electron
 
 data = loadtxt("data/background-spectrum.csv", skiprows=1, delimiter=",", quotechar='"')
 BACKGROUND_NEUTRON_SPECTRUM = Spectrum(
@@ -100,14 +100,14 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 def plot_responses(detector: Detector):
 	""" plot the response of a given detector design to all three kinds of radiation """
 	electron_beam = Beam("electron", MONOENERGETIC_SPECTRUM, width=detector.width, height=LENGTH, shape="rectangular")
-	electron_response, crosstalk_response, num_electrons = calculate_response(detector, electron_beam, num_particles=100_000)
+	electron_response, crosstalk_response, num_electrons = calculate_response(detector, electron_beam, num_particles=1_000_000)
 	electron_weight = 1/num_electrons
 	world_radius = sqrt(detector.width**2 + detector.depth**2 + detector.length**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_NEUTRON_SPECTRUM, distance=world_radius, shape="ambient")
-	neutron_response, _, num_neutrons = calculate_response(detector, neutron_beam, num_particles=1_000_000)
+	neutron_response, _, num_neutrons = calculate_response(detector, neutron_beam, num_particles=5_000_000)
 	neutron_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/num_neutrons
 	photon_beam = Beam("photon", BACKGROUND_PHOTON_SPECTRUM, distance=world_radius, shape="ambient")
-	photon_response, _, num_photons = calculate_response(detector, photon_beam, num_particles=1_000_000)
+	photon_response, _, num_photons = calculate_response(detector, photon_beam, num_particles=5_000_000)
 	photon_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/num_photons
 
 	energy_bins = linspace(0.05, min(17.05, 1.5*detector.upper_threshold), 86)
@@ -307,11 +307,11 @@ def calculate_background_sensitivity(
 		total_detection_rate += crosstalk_sensitivity
 		total_detection_rate_var += crosstalk_sensitivity_unc**2
 	if include_neutrons:
-		neutron_sensitivity, neutron_sensitivity_unc, _, _ = calculate_sensitivity(detector, neutron_beam, num_particles=1_000_000, use_cache=True)
+		neutron_sensitivity, neutron_sensitivity_unc, _, _ = calculate_sensitivity(detector, neutron_beam, num_particles=5_000_000, use_cache=True)
 		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*neutron_sensitivity
 		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius**2*neutron_sensitivity_unc)**2
 	if include_photons:
-		photon_sensitivity, photon_sensitivity_unc, _, _ = calculate_sensitivity(detector, photon_beam, num_particles=1_000_000, use_cache=True)
+		photon_sensitivity, photon_sensitivity_unc, _, _ = calculate_sensitivity(detector, photon_beam, num_particles=5_000_000, use_cache=True)
 		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity
 		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity_unc)**2
 
