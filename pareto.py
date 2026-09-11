@@ -58,25 +58,21 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 				plot_responses(Detector(material, width, depth, LENGTH, lower_threshold=lower_threshold, upper_threshold=upper_threshold))
 
 	# plot the pareto fronts of performance
-	plt.figure()
-	for material in materials:
-		plt.errorbar(
-			x=concatenate([[0], fronts[material][False][:, 4]]),
-			y=concatenate([[0], fronts[material][False][:, 5]]),
-			xerr=stack([
-				concatenate([[0], fronts[material][False][:, 4] - fronts[material][True][:, 4]]),
-				zeros(len(fronts[material][False]) + 1)],
-				axis=0,
-			),
-			fmt=styles[material], label=material)
-	plt.grid()
-	plt.xlim(0, 1000)
-	plt.ylim(0, 1)
-	plt.xlabel("Background sensitivity (counts per signal electron)")
-	plt.ylabel("Signal sensitivity")
-	plt.legend()
-	plt.tight_layout()
-	plt.savefig("figures/pareto.pdf")
+	for optimistic in [True, False]:
+		plt.figure()
+		for material in materials:
+			plt.plot(
+				concatenate([[0], fronts[material][optimistic][:, 4]]),
+				concatenate([[0], fronts[material][optimistic][:, 5]]),
+				styles[material], label=material)
+		plt.grid()
+		plt.xlim(0, 200)
+		plt.ylim(0, 1)
+		plt.xlabel("Background sensitivity (counts per signal electron)")
+		plt.ylabel("Signal sensitivity")
+		plt.legend()
+		plt.tight_layout()
+		plt.savefig(f"figures/pareto-{'optimistic' if optimistic else 'conservative'}.pdf")
 
 	# plot the actual design variables
 	fig, axs = plt.subplots(3, 1, sharex=True, gridspec_kw=dict(hspace=0))
@@ -139,7 +135,7 @@ def plot_responses(detector: Detector):
 		xerr=sqrt(detector.upper_threshold/efficiency), color="k", capsize=5)
 	# adjust the axes
 	plt.xlim(0, min(1.5*detector.upper_threshold, 18))
-	plt.ylim(0, counts[0].max()*1.05)
+	plt.ylim(0, max(counts[i][energy_bins[1:] > detector.lower_threshold].max() for i in range(4))*1.05)
 	plt.legend()
 	plt.xlabel("Deposited energy (MeV)")
 	plt.title(f"{detector.width:.1f} cm × {detector.depth:.1f} cm {detector.material_name} detector")
@@ -157,56 +153,46 @@ def find_pareto_front(material: str, optimistic: bool) -> list[tuple[float, floa
 	"""
 	os.makedirs("results", exist_ok=True)
 
-	if optimistic:
-		try:
-			parameters = loadtxt(f"results/pareto_{material}.txt", skiprows=1)
-		except FileNotFoundError:
-			raise FileNotFoundError("you have to calculate the conservative pareto front before you can calculate the optimistic pareto front.")
-		results = []
-		for width, depth, lower_threshold, upper_threshold, _, signal_sensitivity in parameters:
-			coincidence_subtraction = True
-			pulse_shape_discrimination = material.startswith("EJ")
-			background_sensitivity = calculate_background_sensitivity(
-				material, width, depth, lower_threshold, upper_threshold,
-				include_photons=True,
-				include_neutrons=not pulse_shape_discrimination,
-				include_crosstalk=not coincidence_subtraction)
-			results.append((width, depth, lower_threshold, upper_threshold, background_sensitivity, signal_sensitivity))
-
-	else:
-		try:
-			results = loadtxt(f"results/pareto_{material}.txt", skiprows=1)
-		except FileNotFoundError:
-			logging.info(f"starting pareto front calculation for {material}...")
-			signal_sensitivities = 1 - linspace(1, 0, 9)[1:-1]**2
-			num_processes = min(len(signal_sensitivities), cpu_count())
-			logging.debug(f"running on {num_processes} parallel processes")
-			with Pool(processes=9) as executor:
-				results = executor.map(
-					optimize_detector_star,
-					[(material, sensitivity) for sensitivity in signal_sensitivities],
-				)
-			savetxt(
-				f"results/pareto_{material}.txt", results, delimiter="\t",
-				header="width (cm)\tdepth (cm)\tlower threshold (MeV)\tupper threshold (MeV)\tbackground sensitivity\tsignal_sensitivity\n")
-			logging.info(f"done!  saved to results/pareto_{material}.txt")
+	filename = f"results/pareto_{material}{'_optimistic' if optimistic else ''}.txt"
+	try:
+		results = loadtxt(filename, skiprows=1)
+	except FileNotFoundError:
+		logging.info(f"starting pareto front calculation for {material}...")
+		signal_sensitivities = 1 - linspace(1, 0, 9)[1:-1]**2
+		num_processes = min(len(signal_sensitivities), cpu_count())
+		logging.debug(f"running on {num_processes} parallel processes")
+		with Pool(processes=9) as executor:
+			results = executor.map(
+				optimize_detector_star,
+				[(material, sensitivity, optimistic) for sensitivity in signal_sensitivities],
+			)
+		savetxt(
+			f"results/pareto_{material}.txt", results, delimiter="\t",
+			header="width (cm)\tdepth (cm)\tlower threshold (MeV)\tupper threshold (MeV)\tbackground sensitivity\tsignal_sensitivity\n")
+		logging.info(f"done!  saved to {filename}")
 
 	return results
 
 
-def optimize_detector_star(args: tuple[str, float]):
+def optimize_detector_star(args: tuple[str, float, bool]):
 	return optimize_detector(*args)
 
 
-def optimize_detector(material: str, signal_sensitivity: float) -> tuple[float, float, float, float, float, float]:
+def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool) -> tuple[float, float, float, float, float, float]:
 	"""
 	get the optimal dimensions and thresholds for a detector of the given material with at least the given signal sensitivity
 	:return: the width (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity, and the achieved signal sensitivity
 	"""
+	coincidence_counting = optimistic
+	pulse_shape_discrimination = optimistic and material.startswith("EJ")
 	if material != "silicon":
 		# optimize with freely varying thickness
 		result = optimize.minimize(
-			lambda x: calculate_background_sensitivity(material, x[0], x[1], x[2], x[2] + 100*signal_sensitivity),  # find the lowest background sensitivity
+			lambda x: calculate_background_sensitivity(
+				material, x[0], x[1], x[2], x[2] + 100*signal_sensitivity,
+				include_photons=True,
+				include_neutrons=not pulse_shape_discrimination,
+				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
 			x0=[1.5, 1.0, 50.*(1 - signal_sensitivity)],
 			bounds=[
 				(0.1, 5.0),
@@ -225,7 +211,11 @@ def optimize_detector(material: str, signal_sensitivity: float) -> tuple[float, 
 		# optimize with fixed thickness
 		depth = 0.1
 		result = optimize.minimize(
-			lambda x: calculate_background_sensitivity(material, x[0], depth, x[1], x[1] + 100*signal_sensitivity),  # find the lowest background sensitivity
+			lambda x: calculate_background_sensitivity(
+				material, x[0], depth, x[1], x[1] + 100*signal_sensitivity,
+				include_photons=True,
+				include_neutrons=not pulse_shape_discrimination,
+				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
 			x0=[1.5, 50.*(1 - signal_sensitivity)],
 			bounds=[
 				(0.1, 5.0),
