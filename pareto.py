@@ -6,7 +6,7 @@ from typing import Callable
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, stack, zeros, full, interp, \
-	quantile, nanmax, geomspace, empty, percentile
+	quantile, nanmax, geomspace, empty, percentile, inf
 from scipy import optimize
 from scipy.special import erf
 
@@ -66,35 +66,35 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 				concatenate([[0], fronts[material][optimistic][:, 5]]),
 				styles[material], label=material)
 		plt.grid()
-		plt.xlim(0, 200)
+		plt.xlim(0, 10)
 		plt.ylim(0, 1)
 		plt.xlabel("Background sensitivity (counts per signal electron)")
 		plt.ylabel("Signal sensitivity")
 		plt.legend()
 		plt.tight_layout()
-		plt.savefig(f"figures/pareto-{'optimistic' if optimistic else 'conservative'}.pdf")
+		plt.savefig(f"figures/pareto_{'optimistic' if optimistic else 'conservative'}.pdf")
 
-	# plot the actual design variables
-	fig, axs = plt.subplots(3, 1, sharex=True, gridspec_kw=dict(hspace=0))
-	for material in materials:
-		axs[0].plot(fronts[material][False][:, 5], fronts[material][False][:, 0], styles[material], label=material)
-		axs[1].plot(fronts[material][False][:, 5], fronts[material][False][:, 1], styles[material])
-		axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 2], styles[material])
-		axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 3], styles[material])
-	axs[0].legend()
-	axs[0].grid()
-	axs[0].set_ylabel("Width (cm)")
-	axs[0].set_ylim(0, None)
-	axs[1].grid()
-	axs[1].set_ylabel("Depth (cm)")
-	axs[1].set_ylim(0, None)
-	axs[2].grid()
-	axs[2].set_ylabel("Thresholds (MeV)")
-	axs[2].set_ylim(0, INCIDENT_ENERGY)
-	axs[2].set_xlabel("Signal sensitivity")
-	axs[2].set_xlim(None, 1)
-	fig.tight_layout()
-	plt.savefig("figures/pareto_parameters.pdf")
+		# plot the actual design variables
+		fig, axs = plt.subplots(3, 1, sharex=True, gridspec_kw=dict(hspace=0))
+		for material in materials:
+			axs[0].plot(fronts[material][False][:, 5], fronts[material][False][:, 0], styles[material], label=material)
+			axs[1].plot(fronts[material][False][:, 5], fronts[material][False][:, 1], styles[material])
+			axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 2], styles[material])
+			axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 3], styles[material])
+		axs[0].legend()
+		axs[0].grid()
+		axs[0].set_ylabel("Width (cm)")
+		axs[0].set_ylim(0, None)
+		axs[1].grid()
+		axs[1].set_ylabel("Depth (cm)")
+		axs[1].set_ylim(0, None)
+		axs[2].grid()
+		axs[2].set_ylabel("Thresholds (MeV)")
+		axs[2].set_ylim(0, INCIDENT_ENERGY)
+		axs[2].set_xlabel("Signal sensitivity")
+		axs[2].set_xlim(None, 1)
+		fig.tight_layout()
+		plt.savefig(f"figures/pareto_parameters_{'optimistic' if optimistic else 'conservative'}.pdf")
 
 
 def plot_responses(detector: Detector):
@@ -153,7 +153,7 @@ def find_pareto_front(material: str, optimistic: bool) -> list[tuple[float, floa
 	"""
 	os.makedirs("results", exist_ok=True)
 
-	filename = f"results/pareto_{material}{'_optimistic' if optimistic else ''}.txt"
+	filename = f"results/pareto_{material}_{'optimistic' if optimistic else 'conservative'}.txt"
 	try:
 		results = loadtxt(filename, skiprows=1)
 	except FileNotFoundError:
@@ -167,7 +167,7 @@ def find_pareto_front(material: str, optimistic: bool) -> list[tuple[float, floa
 				[(material, sensitivity, optimistic) for sensitivity in signal_sensitivities],
 			)
 		savetxt(
-			f"results/pareto_{material}.txt", results, delimiter="\t",
+			filename, results, delimiter="\t",
 			header="width (cm)\tdepth (cm)\tlower threshold (MeV)\tupper threshold (MeV)\tbackground sensitivity\tsignal_sensitivity\n")
 		logging.info(f"done!  saved to {filename}")
 
@@ -186,6 +186,17 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 	coincidence_counting = optimistic
 	pulse_shape_discrimination = optimistic and material.startswith("EJ")
 	if material != "silicon":
+		# scan thickness for a good starting point
+		initial_width, initial_lower_percentile = 4.0, 50.*(1 - signal_sensitivity)
+		initial_depth = None
+		initial_background = inf
+		for depth in [0.6, 1.0, 2.0, 4.0, 8.0]:
+			background = calculate_background_sensitivity(
+				material, initial_width, depth, initial_lower_percentile, initial_lower_percentile + 100*signal_sensitivity)
+			if background <= initial_background:
+				initial_background = background
+				initial_depth = depth
+		logging.debug(f"after a quick scan, we found {initial_depth:.1f} cm to be a good depth at which to start")
 		# optimize with freely varying thickness
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
@@ -193,7 +204,7 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-			x0=[1.5, 1.0, 50.*(1 - signal_sensitivity)],
+			x0=[initial_width, initial_depth, initial_lower_percentile],
 			bounds=[
 				(0.1, 5.0),
 				(0.1, 10.0),
