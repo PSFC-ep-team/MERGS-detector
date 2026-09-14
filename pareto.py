@@ -49,6 +49,9 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 
 	fronts = {}
 	for material in materials:
+		if spectrometric and material == "silicon":
+			logging.warning("Silicon strips cannot be a spectrometer")
+			continue
 		fronts[material] = {}
 		for optimistic in [False, True]:
 			fronts[material][optimistic] = array(find_pareto_front(
