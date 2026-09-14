@@ -73,7 +73,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 		plt.ylabel("Signal sensitivity")
 		plt.legend()
 		plt.tight_layout()
-		plt.savefig(f"figures/pareto_{'optimistic' if optimistic else 'conservative'}.pdf")
+		plt.savefig(f"figures/pareto_{'optimistic' if optimistic else 'conservative'}_{'spectrometer' if spectrometric else 'detector'}.pdf")
 
 		# plot the actual design variables
 		fig, axs = plt.subplots(3, 1, sharex=True, gridspec_kw=dict(hspace=0))
@@ -95,7 +95,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 		axs[2].set_xlabel("Signal sensitivity")
 		axs[2].set_xlim(None, 1)
 		fig.tight_layout()
-		plt.savefig(f"figures/pareto_parameters_{'optimistic' if optimistic else 'conservative'}.pdf")
+		plt.savefig(f"figures/pareto_parameters_{'optimistic' if optimistic else 'conservative'}_{'spectrometer' if spectrometric else 'detector'}.pdf")
 
 
 def plot_responses(detector: Detector):
@@ -141,7 +141,7 @@ def plot_responses(detector: Detector):
 	plt.xlabel("Deposited energy (MeV)")
 	plt.title(f"{detector.width:.1f} cm × {detector.depth:.1f} cm {detector.material_name} detector")
 	plt.tight_layout()
-	plt.savefig(f"figures/{detector.material_name}_response.pdf")
+	plt.savefig(f"figures/{detector.material_name}_{detector.width:.1f}cmx{detector.depth:.1f}cm_response.pdf")
 
 
 def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> list[tuple[float, float, float, float, float]]:
