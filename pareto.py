@@ -1,3 +1,4 @@
+import argparse
 import os
 import logging
 from multiprocessing import Pool, cpu_count
@@ -5,7 +6,7 @@ from typing import Callable
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
-from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, stack, zeros, full, interp, \
+from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, full, interp, \
 	quantile, nanmax, geomspace, empty, percentile, inf
 from scipy import optimize
 from scipy.special import erf
@@ -43,7 +44,7 @@ NEUTRON_FRACTION = neutron_sum/(neutron_sum + photon_sum)
 PHOTON_FRACTION = photon_sum/(neutron_sum + photon_sum)
 
 
-def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
+def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometric: bool):
 	os.makedirs("figures", exist_ok=True)
 
 	fronts = {}
@@ -51,7 +52,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str]):
 		fronts[material] = {}
 		for optimistic in [False, True]:
 			fronts[material][optimistic] = array(find_pareto_front(
-				material, optimistic))
+				material, optimistic, spectrometric))
 			if not optimistic:
 				i = len(fronts[material][optimistic])//2
 				width, depth, lower_threshold, upper_threshold, _, _ = fronts[material][optimistic][i, :]
@@ -143,28 +144,29 @@ def plot_responses(detector: Detector):
 	plt.savefig(f"figures/{detector.material_name}_response.pdf")
 
 
-def find_pareto_front(material: str, optimistic: bool) -> list[tuple[float, float, float, float, float]]:
+def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> list[tuple[float, float, float, float, float]]:
 	"""
 	find the pareto front of designs with high sensitivity to signal and low sensitivity to background
 	:param material: the material out of which the detector is made
 	:param optimistic: whether we assume we can use pulse shape discrimination and coincidence subtraction
+	:param spectrometric: whether to require that most electrons be fully stopped
 	:return: a bunch of designs specified by their width (cm), depth (cm), lower threshold (MeV), upper threshold (MeV),
 	         background sensitivity, and signal sensitivity
 	"""
 	os.makedirs("results", exist_ok=True)
 
-	filename = f"results/pareto_{material}_{'optimistic' if optimistic else 'conservative'}.txt"
+	filename = f"results/pareto_{material}_{'optimistic' if optimistic else 'conservative'}_{'spectrometer' if spectrometric else 'detector'}.txt"
 	try:
 		results = loadtxt(filename, skiprows=1)
 	except FileNotFoundError:
-		logging.info(f"starting pareto front calculation for {material}...")
+		logging.info(f"starting {'optimistic' if optimistic else 'conservative'} pareto front calculation for a {material} {'spectrometer' if spectrometric else 'detector'}...")
 		signal_sensitivities = 1 - linspace(1, 0, 9)[1:-1]**2
 		num_processes = min(len(signal_sensitivities), cpu_count())
 		logging.debug(f"running on {num_processes} parallel processes")
 		with Pool(processes=9) as executor:
 			results = executor.map(
 				optimize_detector_star,
-				[(material, sensitivity, optimistic) for sensitivity in signal_sensitivities],
+				[(material, sensitivity, optimistic, spectrometric) for sensitivity in signal_sensitivities],
 			)
 		savetxt(
 			filename, results, delimiter="\t",
@@ -178,25 +180,39 @@ def optimize_detector_star(args: tuple[str, float, bool]):
 	return optimize_detector(*args)
 
 
-def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool) -> tuple[float, float, float, float, float, float]:
+def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool, spectrometric: bool) -> tuple[float, float, float, float, float, float]:
 	"""
 	get the optimal dimensions and thresholds for a detector of the given material with at least the given signal sensitivity
+	:param material: the name of the active volume material
+	:param signal_sensitivity: the required fraction of signal electrons that generate pulses within the thresholds
+	:param optimistic: whether we assume we can use pulse shape discrimination and coincidence subtraction
+	:param spectrometric: whether to require that most electrons be fully stopped
 	:return: the width (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity, and the achieved signal sensitivity
 	"""
 	coincidence_counting = optimistic
 	pulse_shape_discrimination = optimistic and material.startswith("EJ")
 	if material != "silicon":
-		# scan thickness for a good starting point
 		initial_width, initial_lower_percentile = 4.0, 50.*(1 - signal_sensitivity)
-		initial_depth = None
-		initial_background = inf
-		for depth in [0.6, 1.0, 2.0, 4.0, 8.0]:
-			background = calculate_background_sensitivity(
-				material, initial_width, depth, initial_lower_percentile, initial_lower_percentile + 100*signal_sensitivity)
-			if background <= initial_background:
-				initial_background = background
-				initial_depth = depth
-		logging.debug(f"after a quick scan, we found {initial_depth:.1f} cm to be a good depth at which to start")
+		# decide whether to constrain the thresholds
+		if spectrometric:
+			initial_depth = 5.0
+			constraints = [optimize.NonlinearConstraint(
+				lambda x: calculate_thresholds(
+					material, x[0], x[1], x[2], x[2] + 100*signal_sensitivity)[0],
+				lb=INCIDENT_ENERGY - .6, ub=inf,
+			)]
+		else:
+			# scan thickness for a good starting point
+			initial_depth = None
+			initial_background = inf
+			for depth in [0.6, 1.0, 2.0, 4.0, 8.0]:
+				background = calculate_background_sensitivity(
+					material, initial_width, depth, initial_lower_percentile, initial_lower_percentile + 100*signal_sensitivity)
+				if background <= initial_background:
+					initial_background = background
+					initial_depth = depth
+			logging.debug(f"after a quick scan, we found {initial_depth:.1f} cm to be a good depth at which to start")
+			constraints = []
 		# optimize with freely varying thickness
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
@@ -204,6 +220,7 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
+			constraints=constraints,
 			x0=[initial_width, initial_depth, initial_lower_percentile],
 			bounds=[
 				(0.1, 5.0),
@@ -441,7 +458,13 @@ def plot_objective_space_slice(x, y, signal_sensitivities, background_sensitivit
 
 
 if __name__ == "__main__":
+	parser = argparse.ArgumentParser()
+	parser.add_argument("--require-spectrometry", action="store_true")
+	args = parser.parse_args()
+
 	plot_pareto_fronts(
 		["EJ-276D", "EJ-100", "LaBr3", "silicon"],
-		{"EJ-276D": "C2.-", "EJ-100": "C2--", "LaBr3": "C0-", "silicon": "C1:"})
+		{"EJ-276D": "C2.-", "EJ-100": "C2--", "LaBr3": "C0-", "silicon": "C1:"},
+		args.require_spectrometry,
+	)
 	plt.show()
