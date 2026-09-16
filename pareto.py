@@ -194,36 +194,51 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 	"""
 	coincidence_counting = optimistic
 	pulse_shape_discrimination = optimistic and material.startswith("EJ")
-	if material != "silicon":
-		initial_width, initial_lower_percentile = 4.0, 50.*(1 - signal_sensitivity)
-		# decide whether to constrain the thresholds
-		if spectrometric:
-			initial_depth = 5.0
-			constraints = [optimize.NonlinearConstraint(
+	if spectrometric:
+		# constrain the thresholds
+		result = optimize.minimize(
+			lambda x: calculate_background_sensitivity(
+				material, x[0], x[1], 100*(1 - signal_sensitivity), 100,
+				include_photons=True,
+				include_neutrons=not pulse_shape_discrimination,
+				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
+			constraints=[optimize.NonlinearConstraint(
 				lambda x: calculate_thresholds(
-					material, x[0], x[1], x[2], x[2] + 100*signal_sensitivity)[0],
+					material, x[0], x[1], 100*(1 - signal_sensitivity), 100)[0],
 				lb=INCIDENT_ENERGY - .6, ub=inf,
-			)]
-		else:
-			# scan thickness for a good starting point
-			initial_depth = None
-			initial_background = inf
-			for depth in [0.6, 1.0, 2.0, 4.0, 8.0]:
-				background = calculate_background_sensitivity(
-					material, initial_width, depth, initial_lower_percentile, initial_lower_percentile + 100*signal_sensitivity)
-				if background <= initial_background:
-					initial_background = background
-					initial_depth = depth
-			logging.debug(f"after a quick scan, we found {initial_depth:.1f} cm to be a good depth at which to start")
-			constraints = []
-		# optimize with freely varying thickness
+			)],
+			x0=[4.0, 4.0],
+			bounds=[
+				(0.1, 5.0),
+				(0.1, 10.0),
+			],
+			method="cobyqa",
+			options=dict(
+				initial_tr_radius=0.5,
+				final_tr_radius=1.e-4,
+			),
+		)
+		width, depth, lower_percentile = result.x
+
+	elif material != "silicon":
+		initial_width, initial_lower_percentile = 4.0, 50.*(1 - signal_sensitivity)
+		# scan thickness for a good starting point
+		initial_depth = None
+		initial_background = inf
+		for depth in [0.6, 1.0, 2.0, 4.0, 8.0]:
+			background = calculate_background_sensitivity(
+				material, initial_width, depth, initial_lower_percentile, initial_lower_percentile + 100*signal_sensitivity)
+			if background <= initial_background:
+				initial_background = background
+				initial_depth = depth
+		logging.debug(f"after a quick scan, we found {initial_depth:.1f} cm to be a good depth at which to start")
+		# optimize with freely varying thickness and thresholds
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
 				material, x[0], x[1], x[2], x[2] + 100*signal_sensitivity,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-			constraints=constraints,
 			x0=[initial_width, initial_depth, initial_lower_percentile],
 			bounds=[
 				(0.1, 5.0),
