@@ -56,7 +56,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 		simulated_fraction = 1
 
 	# do the simulation
-	energy_deposited_directly, energy_deposited_indirectly, num_particles = calculate_response(detector, beam, num_particles)
+	energy_deposited_directly, energy_deposited_indirectly = calculate_response(detector, beam, num_particles)
 
 	sensitivity, sensitivity_error = [], []
 	for energy_deposited in [energy_deposited_directly, energy_deposited_indirectly]:
@@ -86,7 +86,7 @@ def calculate_sensitivity(detector: Detector, beam: Beam, num_particles=10000, u
 	return direct_sensitivity, direct_sensitivity_error, cross_sensitivity, cross_sensitivity_error
 
 
-def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> tuple[NDArray, NDArray, int]:
+def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> tuple[NDArray, NDArray]:
 	""" run a simulation for this detector and extract the total energy deposition of each interacting particle in both this and adjacent detectors """
 	solids = []
 	# instantiate three adjacent detectors
@@ -109,7 +109,7 @@ def calculate_response(detector: Detector, beam: Beam, num_particles=10000) -> t
 	for detector_index in range(3):
 		responses.append(entries[entries["detector"] == detector_index]["E_depositedMeV"])
 
-	return responses[1], concatenate([responses[0], responses[2]]), num_particles  # combine the two adjacent detectors when you return
+	return responses[1], concatenate([responses[0], responses[2]])  # combine the two adjacent detectors when you return
 
 
 class Detector:
