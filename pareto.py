@@ -28,7 +28,7 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
 
-LENGTH = 10  # cm
+FOCAL_PLANE_HEIGHT = 10  # cm
 BACKGROUND_FLUENCE = 1e+3  # particle/cm²/electron
 
 data = loadtxt("data/background-spectrum.csv", skiprows=1, delimiter=",", quotechar='"')
@@ -59,8 +59,8 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 	logging.info("Generating final plots...")
 	for material in fronts.keys():
 		i = len(fronts[material][False])//2
-		width, depth, lower_threshold, upper_threshold, _, _ = fronts[material][False][i, :]
-		plot_responses(Detector(material, width, depth, LENGTH, lower_threshold=lower_threshold, upper_threshold=upper_threshold), incident_energy=16.7)
+		width, depth, length, lower_threshold, upper_threshold, _, _ = fronts[material][False][i, :]
+		plot_responses(Detector(material, width, depth, length, lower_threshold=lower_threshold, upper_threshold=upper_threshold), incident_energy=16.7)
 
 	for optimistic in [True, False]:
 		plt.figure()
@@ -104,7 +104,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 def plot_responses(detector: Detector, incident_energy: float, num_background_particles=5_000_000):
 	""" plot the response of a given detector design to all three kinds of radiation """
 	num_electrons, num_neutrons, num_photons = 1_000_000, num_background_particles, num_background_particles
-	electron_beam = Beam("electron", tight_spectrum(incident_energy), width=detector.width, height=LENGTH, shape="rectangular")
+	electron_beam = Beam("electron", tight_spectrum(incident_energy), width=detector.width, height=FOCAL_PLANE_HEIGHT, shape="rectangular")
 	electron_response, crosstalk_response = calculate_response(detector, electron_beam, num_particles=num_electrons)
 	electron_weight = 1/num_electrons
 	world_radius = sqrt(detector.width**2 + detector.depth**2 + detector.length**2)/2
@@ -143,20 +143,21 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	plt.ylim(0, max(counts[i][energy_bins[1:] > detector.lower_threshold].max() for i in range(4))*1.05)
 	plt.legend()
 	plt.xlabel("Deposited energy (MeV)")
-	plt.title(f"{detector.width:.1f} cm × {detector.depth:.1f} cm {detector.material_name} detector")
+	plt.title(f"{detector.width:.1f} cm × {detector.length:.1f} cm × {detector.depth:.1f} cm {detector.material_name} detector")
 	plt.tight_layout()
-	filename = f"figures/{detector.material_name}_{detector.width:.1f}cmx{detector.depth:.1f}cm_response.pdf"
+	filename = f"figures/{detector.material_name}_{detector.width:.1f}cmx{detector.length:.1f}cmx{detector.depth:.1f}cm_response.pdf"
 	plt.savefig(filename)
 	logging.info(f"Saved response plot to {filename}")
 
 
-def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> list[tuple[float, float, float, float, float, float]]:
+def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> list[tuple[float, float, float, float, float, float, float]]:
 	"""
 	find the pareto front of designs with high sensitivity to signal and low sensitivity to background
 	:param material: the material out of which the detector is made
 	:param optimistic: whether we assume we can use pulse shape discrimination and coincidence subtraction
 	:param spectrometric: whether to require that most electrons be fully stopped
-	:return: a bunch of designs specified by their width (cm), depth (cm), lower threshold (MeV), upper threshold (MeV),
+	:return: a bunch of designs specified by their width (cm), length (cm), depth (cm),
+	         lower threshold (MeV), upper threshold (MeV),
 	         background sensitivity, and signal sensitivity
 	"""
 	os.makedirs("results", exist_ok=True)
@@ -177,7 +178,7 @@ def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> l
 			)
 		savetxt(
 			filename, results, delimiter="\t",
-			header="width (cm)\tdepth (cm)\tlower threshold (MeV)\tupper threshold (MeV)\tbackground sensitivity\tsignal_sensitivity\n")
+			header="width (cm)\tlength(cm)\tdepth (cm)\tlower threshold (MeV)\tupper threshold (MeV)\tbackground sensitivity\tsignal_sensitivity\n")
 		logging.info(f"done!  saved to {filename}")
 
 	return results
@@ -187,7 +188,7 @@ def optimize_detector_star(args: tuple[str, float, bool, float]):
 	return optimize_detector(*args)
 
 
-def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool, spectrometric: bool, incident_energy: float) -> tuple[float, float, float, float, float, float]:
+def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool, spectrometric: bool, incident_energy: float) -> tuple[float, float, float, float, float, float, float]:
 	"""
 	get the optimal dimensions and thresholds for a detector of the given material with at least the given signal sensitivity
 	:param material: the name of the active volume material
@@ -195,7 +196,7 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 	:param optimistic: whether we assume we can use pulse shape discrimination and coincidence subtraction
 	:param spectrometric: whether to require that most electrons be fully stopped
 	:param incident_energy: the electron energy being optimized for (MeV)
-	:return: the width (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity, and the achieved signal sensitivity
+	:return: the width (cm), the length (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity, and the achieved signal sensitivity
 	"""
 	coincidence_counting = optimistic
 	pulse_shape_discrimination = optimistic and material.startswith("EJ")
@@ -204,18 +205,19 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 		# constrain the thresholds
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
-				material, x[0], x[1], lower_percentile, 100, incident_energy,
+				material, x[0], x[1], x[2], lower_percentile, 100, incident_energy,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
 			constraints=[optimize.NonlinearConstraint(
 				lambda x: calculate_thresholds(
-					material, x[0], x[1], lower_percentile, 100, incident_energy)[0],
+					material, x[0], x[1], x[2], lower_percentile, 100, incident_energy)[0],
 				lb=incident_energy - .6, ub=inf,
 			)],
-			x0=[4.0, 4.0],
+			x0=[4.0, 14.0, 4.0],
 			bounds=[
-				(0.1, 5.0),
+				(0.1, 10.0),
+				(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
 				(0.1, 10.0),
 			],
 			method="cobyqa",
@@ -224,16 +226,16 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 				final_tr_radius=1.e-4,
 			),
 		)
-		width, depth = result.x
+		width, length, depth = result.x
 
 	elif material != "silicon":
-		initial_width, initial_lower_percentile = 4.0, 50.*(1 - signal_sensitivity)
+		initial_width, initial_length, initial_lower_percentile = 4.0, 14.0, 50.*(1 - signal_sensitivity)
 		# scan thickness for a good starting point
 		initial_depth = None
 		initial_background = inf
 		for depth in [0.1, 0.5, 1.0, 2.0, 4.0, 8.0]:
 			background = calculate_background_sensitivity(
-				material, initial_width, depth, initial_lower_percentile, initial_lower_percentile + 100*signal_sensitivity, incident_energy)
+				material, initial_width, initial_length, depth, initial_lower_percentile, initial_lower_percentile + 100*signal_sensitivity, incident_energy)
 			if background <= initial_background:
 				initial_background = background
 				initial_depth = depth
@@ -241,13 +243,14 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 		# optimize with freely varying thickness and thresholds
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
-				material, x[0], x[1], x[2], x[2] + 100*signal_sensitivity, incident_energy,
+				material, x[0], x[1], x[2], x[3], x[3] + 100*signal_sensitivity, incident_energy,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-			x0=[initial_width, initial_depth, initial_lower_percentile],
+			x0=[initial_width, initial_length, initial_depth, initial_lower_percentile],
 			bounds=[
 				(0.1, 5.0),
+				(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
 				(0.1, 10.0),
 				(1., 100.*(1 - signal_sensitivity)),
 			],
@@ -257,20 +260,21 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 				final_tr_radius=1.e-4,
 			),
 		)
-		width, depth, lower_percentile = result.x
+		width, length, depth, lower_percentile = result.x
 
 	else:
 		# optimize with fixed thickness
 		depth = 0.1
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
-				material, x[0], depth, x[1], x[1] + 100*signal_sensitivity, incident_energy,
+				material, x[0], x[1], depth, x[2], x[2] + 100*signal_sensitivity, incident_energy,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-			x0=[1.5, 50.*(1 - signal_sensitivity)],
+			x0=[1.5, 14.0, 50.*(1 - signal_sensitivity)],
 			bounds=[
 				(0.1, 5.0),
+				(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
 				(0., 100.*(1 - signal_sensitivity)),
 			],
 			method="cobyqa",
@@ -279,24 +283,24 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 				final_tr_radius=1.e-4,
 			),
 		)
-		width, lower_percentile = result.x
+		width, length, lower_percentile = result.x
 	upper_percentile = lower_percentile + 100*signal_sensitivity
 
 	if not result.success:
 		logging.warning(f"the optimization failed for signal sensitivity of {signal_sensitivity:.3g}; {result.message}")
 	else:
 		logging.info(f"after {result.nfev} steps, we found an optimum that achieves {signal_sensitivity:.3g} for signal, {result.fun:.3g} for background")
-	lower_threshold, upper_threshold = calculate_thresholds(material, width, depth, lower_percentile, upper_percentile, incident_energy)
-	return width, depth, lower_threshold, upper_threshold, result.fun, signal_sensitivity
+	lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, lower_percentile, upper_percentile, incident_energy)
+	return width, length, depth, lower_threshold, upper_threshold, result.fun, signal_sensitivity
 
 
 def calculate_thresholds(
-		material: str, width: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float,
+		material: str, width: float, length: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float,
 ) -> tuple[float, float]:
 	"""
 	the thresholds that achieve the given percentiles
 	"""
-	cache_key = (f"{material}, {width:.12g}, {depth:.12g}, "
+	cache_key = (f"{material}, {width:.12g}, {length:.12g}, {depth:.12g}, "
 	             f"{lower_percentile:.12g}, {upper_percentile:.12g}, {incident_energy:.12g}, thresholds")
 	# first, try to load it from the cache
 	try:
@@ -312,8 +316,8 @@ def calculate_thresholds(
 	width = max(0.001, width)
 	depth = max(0.001, depth)
 	detector = Detector(
-		material=material, width=width, depth=depth, length=LENGTH)
-	beam = Beam("electron", tight_spectrum(incident_energy), width=width, height=LENGTH, shape="rectangular")
+		material=material, width=width, length=length, depth=depth)
+	beam = Beam("electron", tight_spectrum(incident_energy), width=width, height=FOCAL_PLANE_HEIGHT, shape="rectangular")
 	energies, _ = calculate_response(detector, beam, num_particles=1_000_000)
 	efficiency = MATERIAL_DATA[material]["efficiency"]
 
@@ -363,7 +367,7 @@ def calculate_thresholds(
 
 
 def calculate_background_sensitivity(
-		material: str, width: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float,
+		material: str, width: float, length: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float,
 		include_neutrons=True, include_photons=True, include_crosstalk=True,
 		use_percentiles=True, num_background_particles=5_000_000,
 ) -> float:
@@ -373,16 +377,16 @@ def calculate_background_sensitivity(
 	width = max(0.001, width)
 	depth = max(0.001, depth)
 	if use_percentiles:
-		lower_threshold, upper_threshold = calculate_thresholds(material, width, depth, lower_percentile, upper_percentile, incident_energy)
+		lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, lower_percentile, upper_percentile, incident_energy)
 	else:
 		lower_threshold, upper_threshold = lower_percentile, upper_percentile
 	detector = Detector(
-		material=material, width=width, depth=depth, length=LENGTH,
+		material=material, width=width, length=length, depth=depth,
 		lower_threshold=lower_threshold, upper_threshold=upper_threshold)
-	world_radius = sqrt((3*width)**2 + depth**2 + detector.length**2)/2
+	world_radius = sqrt((3*width)**2 + length**2 + depth**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_NEUTRON_SPECTRUM, distance=world_radius, shape="ambient")
 	photon_beam = Beam("photon", BACKGROUND_PHOTON_SPECTRUM, distance=world_radius, shape="ambient")
-	electron_beam = Beam("electron", tight_spectrum(incident_energy), width=width, height=LENGTH, shape="rectangular")
+	electron_beam = Beam("electron", tight_spectrum(incident_energy), width=width, height=FOCAL_PLANE_HEIGHT, shape="rectangular")
 	total_detection_rate = 0.
 	total_detection_rate_var = 0.
 	if include_crosstalk:
@@ -401,7 +405,7 @@ def calculate_background_sensitivity(
 	total_detection_rate_unc = sqrt(total_detection_rate_var)
 	if total_detection_rate_unc > .10*total_detection_rate:
 		logging.warning(
-			f"when calculating the sensitivity of a {detector.width:.2g}×{detector.depth:.2g} cm "
+			f"when calculating the sensitivity of a {detector.width:.2g}×{detector.length:.2g}×{detector.depth:.2g} cm "
 			f"{detector.material_name} detector to background, counting only particles between "
 			f"{detector.lower_threshold:.2g} and {detector.upper_threshold:.2g} MeV, we got an unacceptably "
 			f"uncertain anser of {total_detection_rate:.3g} ± {total_detection_rate_unc:.3g}.")
@@ -451,7 +455,7 @@ def find_root(f: Callable[[float], float], bracket: tuple[float, float], x0: flo
 
 
 def test_plot_responses():
-	plot_responses(Detector("EJ-276D", width=2, depth=5, lower_threshold=5, upper_threshold=17), incident_energy=16.7)
+	plot_responses(Detector("EJ-276D", width=2, length=10, depth=5, lower_threshold=5, upper_threshold=17), incident_energy=16.7)
 
 
 def plot_objective_space_slice(x, y, signal_sensitivities, background_sensitivities, x_label, y_label):
