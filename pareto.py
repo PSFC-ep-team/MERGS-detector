@@ -56,15 +56,17 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 		for optimistic in [False, True]:
 			fronts[material][optimistic] = array(find_pareto_front(
 				material, optimistic, spectrometric))
-			if not optimistic:
-				i = len(fronts[material][optimistic])//2
-				width, depth, lower_threshold, upper_threshold, _, _ = fronts[material][optimistic][i, :]
-				plot_responses(Detector(material, width, depth, LENGTH, lower_threshold=lower_threshold, upper_threshold=upper_threshold))
 
 	# plot the pareto fronts of performance
+	logging.info("Generating final plots...")
+	for material in fronts.keys():
+		i = len(fronts[material][False])//2
+		width, depth, lower_threshold, upper_threshold, _, _ = fronts[material][False][i, :]
+		plot_responses(Detector(material, width, depth, LENGTH, lower_threshold=lower_threshold, upper_threshold=upper_threshold))
+
 	for optimistic in [True, False]:
 		plt.figure()
-		for material in materials:
+		for material in fronts.keys():
 			plt.plot(
 				concatenate([[0], fronts[material][optimistic][:, 4]]),
 				concatenate([[0], fronts[material][optimistic][:, 5]]),
@@ -80,11 +82,11 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 
 		# plot the actual design variables
 		fig, axs = plt.subplots(3, 1, sharex=True, gridspec_kw=dict(hspace=0))
-		for material in materials:
-			axs[0].plot(fronts[material][False][:, 5], fronts[material][False][:, 0], styles[material], label=material)
-			axs[1].plot(fronts[material][False][:, 5], fronts[material][False][:, 1], styles[material])
-			axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 2], styles[material])
-			axs[2].plot(fronts[material][False][:, 5], fronts[material][False][:, 3], styles[material])
+		for material in fronts.keys():
+			axs[0].plot(fronts[material][optimistic][:, 5], fronts[material][optimistic][:, 0], styles[material], label=material)
+			axs[1].plot(fronts[material][optimistic][:, 5], fronts[material][optimistic][:, 1], styles[material])
+			axs[2].plot(fronts[material][optimistic][:, 5], fronts[material][optimistic][:, 2], styles[material])
+			axs[2].plot(fronts[material][optimistic][:, 5], fronts[material][optimistic][:, 3], styles[material])
 		axs[0].legend()
 		axs[0].grid()
 		axs[0].set_ylabel("Width (cm)")
@@ -144,7 +146,9 @@ def plot_responses(detector: Detector):
 	plt.xlabel("Deposited energy (MeV)")
 	plt.title(f"{detector.width:.1f} cm × {detector.depth:.1f} cm {detector.material_name} detector")
 	plt.tight_layout()
-	plt.savefig(f"figures/{detector.material_name}_{detector.width:.1f}cmx{detector.depth:.1f}cm_response.pdf")
+	filename = f"figures/{detector.material_name}_{detector.width:.1f}cmx{detector.depth:.1f}cm_response.pdf"
+	plt.savefig(filename)
+	logging.info(f"Saved response plot to {filename}")
 
 
 def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> list[tuple[float, float, float, float, float]]:
@@ -161,6 +165,7 @@ def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> l
 	filename = f"results/pareto_{material}_{'optimistic' if optimistic else 'conservative'}_{'spectrometer' if spectrometric else 'detector'}.txt"
 	try:
 		results = loadtxt(filename, skiprows=1)
+		logging.info(f"loaded pareto front from {filename}")
 	except FileNotFoundError:
 		logging.info(f"starting {'optimistic' if optimistic else 'conservative'} pareto front calculation for a {material} {'spectrometer' if spectrometric else 'detector'}...")
 		signal_sensitivities = 1 - linspace(1, 0, 9)[1:-1]**2
@@ -195,16 +200,17 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 	coincidence_counting = optimistic
 	pulse_shape_discrimination = optimistic and material.startswith("EJ")
 	if spectrometric:
+		lower_percentile = 100*(1 - signal_sensitivity)
 		# constrain the thresholds
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
-				material, x[0], x[1], 100*(1 - signal_sensitivity), 100,
+				material, x[0], x[1], lower_percentile, 100,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
 			constraints=[optimize.NonlinearConstraint(
 				lambda x: calculate_thresholds(
-					material, x[0], x[1], 100*(1 - signal_sensitivity), 100)[0],
+					material, x[0], x[1], lower_percentile, 100)[0],
 				lb=INCIDENT_ENERGY - .6, ub=inf,
 			)],
 			x0=[4.0, 4.0],
@@ -218,14 +224,14 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 				final_tr_radius=1.e-4,
 			),
 		)
-		width, depth, lower_percentile = result.x
+		width, depth = result.x
 
 	elif material != "silicon":
 		initial_width, initial_lower_percentile = 4.0, 50.*(1 - signal_sensitivity)
 		# scan thickness for a good starting point
 		initial_depth = None
 		initial_background = inf
-		for depth in [0.6, 1.0, 2.0, 4.0, 8.0]:
+		for depth in [0.1, 0.5, 1.0, 2.0, 4.0, 8.0]:
 			background = calculate_background_sensitivity(
 				material, initial_width, depth, initial_lower_percentile, initial_lower_percentile + 100*signal_sensitivity)
 			if background <= initial_background:
@@ -276,7 +282,10 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 		width, lower_percentile = result.x
 	upper_percentile = lower_percentile + 100*signal_sensitivity
 
-	logging.info(f"after {result.nfev} steps, we found an optimum that achieves {signal_sensitivity:.3g} for signal, {result.fun:.3g} for background")
+	if not result.success:
+		logging.warning(f"the optimization failed for signal sensitivity of {signal_sensitivity:.3g}; {result.message}")
+	else:
+		logging.info(f"after {result.nfev} steps, we found an optimum that achieves {signal_sensitivity:.3g} for signal, {result.fun:.3g} for background")
 	lower_threshold, upper_threshold = calculate_thresholds(material, width, depth, lower_percentile, upper_percentile)
 	return width, depth, lower_threshold, upper_threshold, result.fun, signal_sensitivity
 
@@ -322,6 +331,30 @@ def calculate_thresholds(
 			x0=percentile(energies, percentile_value),
 		)
 		thresholds.append(threshold)
+
+		if abs(threshold - percentile(energies, percentile_value)) > 1 or abs(percentile_value - 100*fraction_below(threshold)) > 1:
+			bottom = min(percentile(energies, 1.), percentile(energies, percentile_value)*0.9, threshold*0.9)
+			top = max(percentile(energies, 99.), percentile(energies, percentile_value)*1.1, threshold*1.1)
+			plt.figure()
+			plt.hist(energies, bins=linspace(bottom, top, 101))
+			plt.axvline(percentile(energies, percentile_value), color="blue", label="initial gess")
+			plt.axvline(threshold, color="orange", linestyle="--", label="final anser")
+			plt.legend()
+			plt.xlim(bottom, top)
+			plt.ylim(0, None)
+			plt.savefig(f"problem {percentile_value:.2f} density.pdf")
+			plt.figure()
+			xx = linspace(bottom, top, 201)
+			cum = 100*array([fraction_below(x) for x in xx])
+			plt.plot(xx, cum)
+			plt.axhline(percentile_value)
+			plt.axvline(percentile(energies, percentile_value), color="blue", label="initial gess")
+			plt.axvline(threshold, color="orange", linestyle="--", label="final anser")
+			plt.legend()
+			plt.xlim(bottom, top)
+			plt.ylim(0, 100)
+			plt.savefig(f"problem {percentile_value:.2f} cumulative.pdf")
+			logging.warning(f"something went wrong with the percentile calculation for {percentile_value:.2f}%.  I tried to save a plot to illustrate the issue.")
 
 	os.makedirs("results", exist_ok=True)
 	with open("results/cache.txt", mode="a") as file:
@@ -389,10 +422,10 @@ def find_root(f: Callable[[float], float], bracket: tuple[float, float], x0: flo
 	if f(right) <= 0:
 		return right
 	# shift x0 a bit if it's redundant with one of the bounds
-	if x0 == left:
-		x0 = 0.9*left + 0.1*right
-	elif x0 == right:
-		x0 = 0.1*left + 0.9*right
+	if x0 < 0.99*left + 0.01*right:
+		x0 = 0.99*left + 0.01*right
+	elif x0 > 0.01*left + 0.99*right:
+		x0 = 0.01*left + 0.99*right
 	# change one of the bounds to x0 to incorporate the initial gess into the search
 	y0 = f(x0)
 	if y0 < 0:
@@ -401,8 +434,11 @@ def find_root(f: Callable[[float], float], bracket: tuple[float, float], x0: flo
 		right = x0
 	else:
 		return x0
-	# run Scipy's secant algorithm
-	return optimize.root_scalar(f, bracket=(left, right), **kwargs).root
+	# run Scipy's Brent algorithm
+	solution = optimize.root_scalar(f, bracket=(left, right), **kwargs)
+	if not solution.converged:
+		logging.warning(f"root_scalar did not converge; it returned a result of {flag}")
+	return solution.root
 
 
 def test_plot_responses():

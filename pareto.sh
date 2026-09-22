@@ -29,5 +29,5 @@ for i in $(seq 1 11); do
 done
 
 echo "Our time is up but there's more work to do.  Recuing..."
-sbatch pareto.sh
+sbatch pareto.sh $@
 exit 0
