@@ -2,8 +2,7 @@ import matplotlib.pyplot as plt
 from numpy import inf, array, empty
 
 from detector import Detector
-from pareto import LENGTH, calculate_background_sensitivity, plot_responses, calculate_thresholds
-
+from pareto import calculate_background_sensitivity, plot_responses, calculate_thresholds, optimize_detector
 
 SIGNAL_RATE = 1  # electron/s
 IGNORABLE_PULSE_HEIGHT = 0.1  # MeV
@@ -16,29 +15,25 @@ def compare():
 	optimistic_background_levels = {}
 	conservative_background_levels = {}
 	count_rates = {}
-	for strategy in ["tiny", "large"]:
-		optimistic_background_levels[strategy] = empty((signal_sensitivities.size, incident_energies.size))
-		conservative_background_levels[strategy] = empty((signal_sensitivities.size, incident_energies.size))
-		count_rates[strategy] = empty((signal_sensitivities.size, incident_energies.size))
+	for mode in ["strip", "slab", "block"]:
+		optimistic_background_levels[mode] = empty((signal_sensitivities.size, incident_energies.size))
+		conservative_background_levels[mode] = empty((signal_sensitivities.size, incident_energies.size))
+		count_rates[mode] = empty((signal_sensitivities.size, incident_energies.size))
 		for i, signal_sensitivity in enumerate(signal_sensitivities):
 			for j, incident_energy in enumerate(incident_energies):
 				# determine the detector parameters
-				if strategy == "tiny":
-					width, depth = 0.1, 0.1
-					lower_percentile, upper_percentile = 20*(1 - signal_sensitivity), 20 + 80*signal_sensitivity
-				else:
-					# width, depth, _, _ = optimize_detector(
-					# 	material, signal_sensitivity, optimistic=True, spectrometric=True)
-					width, depth = 6, 8
-					lower_percentile, upper_percentile = 100*(1 - signal_sensitivity), 100
-				plot = incident_energy == 16.7 and ((strategy == "tiny" and signal_sensitivity == .80) or (strategy == "large" and signal_sensitivity == .50))
+				width, length, depth, lower_percentile, upper_percentile, _, _ = optimize_detector(
+					material, signal_sensitivity, mode=mode,
+					spectroscopic_quality=.5 if mode != "strip" else .0, optimistic=True,
+					incident_energy=16.7)
+				plot = incident_energy == 16.7 and signal_sensitivity == .80
 
 				optimistic_background_level, conservative_background_level, count_rate = evaluate_detector(
-					material, width, depth, lower_percentile, upper_percentile, incident_energy, plot=plot,
+					material, width, length, depth, lower_percentile, upper_percentile, incident_energy, plot=plot,
 				)
-				optimistic_background_levels[strategy][i, j] = optimistic_background_level
-				conservative_background_levels[strategy][i, j] = conservative_background_level
-				count_rates[strategy][i, j] = count_rate
+				optimistic_background_levels[mode][i, j] = optimistic_background_level
+				conservative_background_levels[mode][i, j] = conservative_background_level
+				count_rates[mode][i, j] = count_rate
 
 	for i, signal_sensitivity in enumerate(signal_sensitivities):
 		fig, axs = plt.subplots(nrows=2, ncols=1, sharex="all", gridspec_kw=dict(hspace=0), figsize=(6, 6))
@@ -66,22 +61,22 @@ def compare():
 	plt.show()
 
 
-def evaluate_detector(material: str, width: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float, plot=False) -> tuple[float, float, float]:
+def evaluate_detector(material: str, width: float, length: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float, plot=False) -> tuple[float, float, float]:
 	""" calculate the range of possible background levels (per signal particle) and the total count rate of this detector """
-	lower_threshold, upper_threshold = calculate_thresholds(material, width, depth, lower_percentile, upper_percentile, incident_energy)
+	lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, incident_energy, lower_percentile, upper_percentile)
 	num_background_particles = round(10_000_000/(width*depth*LENGTH)**(1/3))
 	optimistic_background = calculate_background_sensitivity(
-		material, width, depth, lower_threshold, upper_threshold, incident_energy,
+		material, width, length, depth, lower_threshold, upper_threshold, incident_energy,
 		include_photons=True, include_neutrons=False, include_crosstalk=False,
 		num_background_particles=num_background_particles,
 		use_percentiles=False)
 	conservative_background = optimistic_background + calculate_background_sensitivity(
-		material, width, depth, lower_threshold, upper_threshold, incident_energy,
+		material, width, length, depth, lower_threshold, upper_threshold, incident_energy,
 		include_photons=False, include_neutrons=True, include_crosstalk=True,
 		num_background_particles=num_background_particles,
 		use_percentiles=False)
 	count_rate = SIGNAL_RATE*calculate_background_sensitivity(
-		material, width, depth, IGNORABLE_PULSE_HEIGHT, inf, incident_energy,
+		material, width, length, depth, IGNORABLE_PULSE_HEIGHT, inf, incident_energy,
 		include_photons=True, include_neutrons=True, include_crosstalk=True,
 		num_background_particles=num_background_particles,
 		use_percentiles=False)
@@ -89,7 +84,7 @@ def evaluate_detector(material: str, width: float, depth: float, lower_percentil
 	if plot:
 		plot_responses(
 			Detector(
-				material, width, depth,
+				material, width, depth, length,
 				lower_threshold=lower_threshold, upper_threshold=upper_threshold,
 			),
 			num_background_particles=num_background_particles,

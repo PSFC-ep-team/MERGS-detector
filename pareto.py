@@ -2,7 +2,7 @@ import argparse
 import os
 import logging
 from multiprocessing import Pool, cpu_count
-from typing import Callable
+from typing import Callable, Literal
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
@@ -107,7 +107,7 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	electron_beam = Beam("electron", tight_spectrum(incident_energy), width=detector.width, height=FOCAL_PLANE_HEIGHT, shape="rectangular")
 	electron_response, crosstalk_response = calculate_response(detector, electron_beam, num_particles=num_electrons)
 	electron_weight = 1/num_electrons
-	world_radius = sqrt(detector.width**2 + detector.depth**2 + detector.length**2)/2
+	world_radius = sqrt(detector.width**2 + detector.length**2 + detector.depth**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_NEUTRON_SPECTRUM, distance=world_radius, shape="ambient")
 	neutron_response, _ = calculate_response(detector, neutron_beam, num_particles=num_neutrons)
 	neutron_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/num_neutrons
@@ -174,7 +174,7 @@ def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> l
 		with Pool(processes=9) as executor:
 			results = executor.map(
 				optimize_detector_star,
-				[(material, sensitivity, optimistic, spectrometric, 16.7) for sensitivity in signal_sensitivities],
+				[(material, sensitivity, 0.5 if spectrometric else 0.0, optimistic, "any", 16.7) for sensitivity in signal_sensitivities],
 			)
 		savetxt(
 			filename, results, delimiter="\t",
@@ -184,23 +184,43 @@ def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> l
 	return results
 
 
-def optimize_detector_star(args: tuple[str, float, bool, float]):
+def optimize_detector_star(args: tuple[str, float, float, bool, str, float]):
 	return optimize_detector(*args)
 
 
-def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool, spectrometric: bool, incident_energy: float) -> tuple[float, float, float, float, float, float, float]:
+def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_quality: float, optimistic: bool, mode: Literal["block", "slab", "strip", "any"], incident_energy: float) -> tuple[float, float, float, float, float, float, float]:
 	"""
 	get the optimal dimensions and thresholds for a detector of the given material with at least the given signal sensitivity
 	:param material: the name of the active volume material
 	:param signal_sensitivity: the required fraction of signal electrons that generate pulses within the thresholds
+	:param spectroscopic_quality: the required fraction of electrons that we stop completely or almost completely
 	:param optimistic: whether we assume we can use pulse shape discrimination and coincidence subtraction
-	:param spectrometric: whether to require that most electrons be fully stopped
+	:param mode: which set of free parameters and constraints to use.  one of:
+	             - "block" – a large chunky detector designed to fully stop the electrons, which will probably not get much spacial information
+	             - "slab" – a deep but thin detector designed to get some spacial information and also get spectral information in combination with its neibors
+	             - "strip" – a tiny detector designed to forsake spectral information and minimize background
+	             - "any" – it will pick whichever one has the best backgroud performance
 	:param incident_energy: the electron energy being optimized for (MeV)
 	:return: the width (cm), the length (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity, and the achieved signal sensitivity
 	"""
 	coincidence_counting = optimistic
 	pulse_shape_discrimination = optimistic and material.startswith("EJ")
-	if spectrometric:
+	if mode == "any":
+		solutions = []
+		for new_mode in ["block", "slab", "strip"]:
+			try:
+				solutions.append(optimize_detector(material, signal_sensitivity, spectroscopic_quality, optimistic, new_mode, incident_energy))
+			except RuntimeError:
+				pass
+		if len(solutions) == 0:
+			raise RuntimeError("all of the optimizations failed.")
+		else:
+			return min(solutions, key=lambda solution: solution[-2])
+
+	elif mode == "block":
+		if material == "silicon":
+			raise RuntimeError("silicon detectors can't be manufactured that thick.")
+
 		lower_percentile = 100*(1 - signal_sensitivity)
 		# constrain the thresholds
 		result = optimize.minimize(
@@ -211,10 +231,10 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
 			constraints=[optimize.NonlinearConstraint(
 				lambda x: calculate_thresholds(
-					material, x[0], x[1], x[2], lower_percentile, 100, incident_energy)[0],
+					material, x[0], x[1], x[2], incident_energy, 100*(1 - spectroscopic_quality))[0],
 				lb=incident_energy - .6, ub=inf,
 			)],
-			x0=[4.0, 14.0, 4.0],
+			x0=[4.0, 14.0, 6.0],
 			bounds=[
 				(0.1, 10.0),
 				(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
@@ -228,28 +248,26 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 		)
 		width, length, depth = result.x
 
-	elif material != "silicon":
-		initial_width, initial_length, initial_lower_percentile = 4.0, 14.0, 50.*(1 - signal_sensitivity)
-		# scan thickness for a good starting point
-		initial_depth = None
-		initial_background = inf
-		for depth in [0.1, 0.5, 1.0, 2.0, 4.0, 8.0]:
-			background = calculate_background_sensitivity(
-				material, initial_width, initial_length, depth, initial_lower_percentile, initial_lower_percentile + 100*signal_sensitivity, incident_energy)
-			if background <= initial_background:
-				initial_background = background
-				initial_depth = depth
-		logging.debug(f"after a quick scan, we found {initial_depth:.1f} cm to be a good depth at which to start")
+	elif mode == "slab":
+		if material == "silicon":
+			raise ValueError("silicon detectors can't be manufactured that thick.")
+
+		# optimize with fixed width
+		width = 1.0
 		# optimize with freely varying thickness and thresholds
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
-				material, x[0], x[1], x[2], x[3], x[3] + 100*signal_sensitivity, incident_energy,
+				material, width, x[1], x[2], x[3], x[3] + 100*signal_sensitivity, incident_energy,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-			x0=[initial_width, initial_length, initial_depth, initial_lower_percentile],
+			constraints=[optimize.NonlinearConstraint(
+				lambda x: calculate_thresholds(
+					material, x[0], x[1], x[2], incident_energy, 100*(1 - spectroscopic_quality))[0],
+				lb=incident_energy - .6, ub=inf,
+			)],
+			x0=[14.0, 4.0, 6.0],
 			bounds=[
-				(0.1, 5.0),
 				(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
 				(0.1, 10.0),
 				(1., 100.*(1 - signal_sensitivity)),
@@ -262,56 +280,63 @@ def optimize_detector(material: str, signal_sensitivity: float, optimistic: bool
 		)
 		width, length, depth, lower_percentile = result.x
 
-	else:
-		# optimize with fixed thickness
-		depth = 0.1
-		result = optimize.minimize(
+	elif mode == "strip":
+		if spectroscopic_quality > 0:
+			raise RuntimeError("we can't make a spectrometer this thin; no way")
+		# optimize with fixed thickness, length, and width
+		width, length, depth = 0.1, 10.0, 0.1
+		result = optimize.minimize_scalar(
 			lambda x: calculate_background_sensitivity(
-				material, x[0], x[1], depth, x[2], x[2] + 100*signal_sensitivity, incident_energy,
+				material, width, length, depth, x, x + 100*signal_sensitivity, incident_energy,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-			x0=[1.5, 14.0, 50.*(1 - signal_sensitivity)],
-			bounds=[
-				(0.1, 5.0),
-				(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
-				(0., 100.*(1 - signal_sensitivity)),
-			],
-			method="cobyqa",
+			bounds=(0., 100.*(1 - signal_sensitivity)),
 			options=dict(
-				initial_tr_radius=0.5,
-				final_tr_radius=1.e-4,
+				xatol=1.e-4,
 			),
 		)
-		width, length, lower_percentile = result.x
+		lower_percentile = result.x
+
+	else:
+		raise ValueError(f"undefined mode, {mode!r}; what _is_ that?")
+
 	upper_percentile = lower_percentile + 100*signal_sensitivity
 
 	if not result.success:
-		logging.warning(f"the optimization failed for signal sensitivity of {signal_sensitivity:.3g}; {result.message}")
+		logging.info(f"the optimization failed for signal sensitivity of {signal_sensitivity:.3g}; {result.message}")
+		raise RuntimeError(result.message)
 	else:
 		logging.info(f"after {result.nfev} steps, we found an optimum that achieves {signal_sensitivity:.3g} for signal, {result.fun:.3g} for background")
-	lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, lower_percentile, upper_percentile, incident_energy)
+	lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, incident_energy, lower_percentile, upper_percentile)
 	return width, length, depth, lower_threshold, upper_threshold, result.fun, signal_sensitivity
 
 
 def calculate_thresholds(
-		material: str, width: float, length: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float,
-) -> tuple[float, float]:
+		material: str, width: float, length: float, depth: float, incident_energy: float, *percentile_values: float,
+) -> tuple[float, ...]:
 	"""
 	the thresholds that achieve the given percentiles
 	"""
-	cache_key = (f"{material}, {width:.12g}, {length:.12g}, {depth:.12g}, "
-	             f"{lower_percentile:.12g}, {upper_percentile:.12g}, {incident_energy:.12g}, thresholds")
-	# first, try to load it from the cache
-	try:
-		with open("results/cache.txt", mode="r") as file:
-			for line in file.readlines():
-				input_string, output_string = line.split(" -> ")
-				if input_string == cache_key:
-					results = output_string.split(",")
-					return tuple(float(x) for x in results)
-	except FileNotFoundError:
-		pass
+	thresholds = []
+	for i, percentile_value in enumerate(percentile_values):
+		cache_key = (f"{material}, {width:.12g}, {length:.12g}, {depth:.12g}, "
+		             f"{incident_energy:.12g}, {percentile_value:.12g}, thresholds")
+		threshold = None
+		# first, try to load it from the cache
+		try:
+			with open("results/cache.txt", mode="r") as file:
+				for line in file.readlines():
+					input_string, output_string = line.split(" -> ")
+					if input_string == cache_key:
+						threshold = float(output_string)
+						break
+		except FileNotFoundError:
+			pass
+		thresholds.append(threshold)
+
+	if not any(threshold is None for threshold in thresholds):
+		return tuple(thresholds)
 
 	width = max(0.001, width)
 	depth = max(0.001, depth)
@@ -327,42 +352,45 @@ def calculate_thresholds(
 		probability_below = 1/2 + 1/2*erf(score/sqrt(2))  # approximate the Poisson distribution as Gaussian so that it's continuus
 		return probability_below.sum()/energies.size
 
-	thresholds = []
-	for percentile_value in [lower_percentile, upper_percentile]:
-		threshold = find_root(
-			lambda threshold: 100*fraction_below(threshold) - percentile_value,
-			bracket=(0.0, incident_energy + 1.0),
-			x0=percentile(energies, percentile_value),
-		)
-		thresholds.append(threshold)
+	for i, percentile_value in enumerate(percentile_values):
+		if thresholds[i] is None:
+			threshold = find_root(
+				lambda threshold: 100*fraction_below(threshold) - percentile_value,
+				bracket=(0.0, incident_energy + 1.0),
+				x0=percentile(energies, percentile_value),
+			)
+			thresholds[i] = threshold
 
-		if abs(threshold - percentile(energies, percentile_value)) > 1 or abs(percentile_value - 100*fraction_below(threshold)) > 1:
-			bottom = min(percentile(energies, 1.), percentile(energies, percentile_value)*0.9, threshold*0.9)
-			top = max(percentile(energies, 99.), percentile(energies, percentile_value)*1.1, threshold*1.1)
-			plt.figure()
-			plt.hist(energies, bins=linspace(bottom, top, 101))
-			plt.axvline(percentile(energies, percentile_value), color="blue", label="initial gess")
-			plt.axvline(threshold, color="orange", linestyle="--", label="final anser")
-			plt.legend()
-			plt.xlim(bottom, top)
-			plt.ylim(0, None)
-			plt.savefig(f"problem {percentile_value:.2f} density.pdf")
-			plt.figure()
-			xx = linspace(bottom, top, 201)
-			cum = 100*array([fraction_below(x) for x in xx])
-			plt.plot(xx, cum)
-			plt.axhline(percentile_value)
-			plt.axvline(percentile(energies, percentile_value), color="blue", label="initial gess")
-			plt.axvline(threshold, color="orange", linestyle="--", label="final anser")
-			plt.legend()
-			plt.xlim(bottom, top)
-			plt.ylim(0, 100)
-			plt.savefig(f"problem {percentile_value:.2f} cumulative.pdf")
-			logging.warning(f"something went wrong with the percentile calculation for {percentile_value:.2f}%.  I tried to save a plot to illustrate the issue.")
+			if abs(threshold - percentile(energies, percentile_value)) > 1 or abs(percentile_value - 100*fraction_below(threshold)) > 1:
+				bottom = min(percentile(energies, 1.), percentile(energies, percentile_value)*0.9, threshold*0.9)
+				top = max(percentile(energies, 99.), percentile(energies, percentile_value)*1.1, threshold*1.1)
+				plt.figure()
+				plt.hist(energies, bins=linspace(bottom, top, 101))
+				plt.axvline(percentile(energies, percentile_value), color="blue", label="initial gess")
+				plt.axvline(threshold, color="orange", linestyle="--", label="final anser")
+				plt.legend()
+				plt.xlim(bottom, top)
+				plt.ylim(0, None)
+				plt.savefig(f"problem {percentile_value:.2f} density.pdf")
+				plt.figure()
+				xx = linspace(bottom, top, 201)
+				cum = 100*array([fraction_below(x) for x in xx])
+				plt.plot(xx, cum)
+				plt.axhline(percentile_value)
+				plt.axvline(percentile(energies, percentile_value), color="blue", label="initial gess")
+				plt.axvline(threshold, color="orange", linestyle="--", label="final anser")
+				plt.legend()
+				plt.xlim(bottom, top)
+				plt.ylim(0, 100)
+				plt.savefig(f"problem {percentile_value:.2f} cumulative.pdf")
+				logging.warning(f"something went wrong with the percentile calculation for {percentile_value:.2f}%.  I tried to save a plot to illustrate the issue.")
 
-	os.makedirs("results", exist_ok=True)
-	with open("results/cache.txt", mode="a") as file:
-		file.write(f"{cache_key} -> {thresholds[0]}, {thresholds[1]}\n")
+			os.makedirs("results", exist_ok=True)
+			with open("results/cache.txt", mode="a") as file:
+				cache_key = (f"{material}, {width:.12g}, {length:.12g}, {depth:.12g}, "
+				             f"{incident_energy:.12g}, {percentile_value:.12g}, thresholds")
+				file.write(f"{cache_key} -> {threshold}\n")
+
 	return tuple(thresholds)
 
 
