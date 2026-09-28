@@ -221,11 +221,11 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 		if material == "silicon":
 			raise RuntimeError("silicon detectors can't be manufactured that thick.")
 
-		lower_percentile = 100*(1 - signal_sensitivity)
-		# constrain the thresholds
+		# optimize with fixed thresholds
+		lower_percentile, upper_percentile = 100*(1 - signal_sensitivity), 100
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
-				material, x[0], x[1], x[2], lower_percentile, 100, incident_energy,
+				material, x[0], x[1], x[2], lower_percentile, upper_percentile, incident_energy,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
@@ -252,25 +252,24 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 		if material == "silicon":
 			raise ValueError("silicon detectors can't be manufactured that thick.")
 
-		# optimize with fixed width
+		# optimize with fixed width and thresholds
 		width = 1.0
-		# optimize with freely varying thickness and thresholds
+		lower_percentile, upper_percentile = 100*(1 - signal_sensitivity), 100
 		result = optimize.minimize(
 			lambda x: calculate_background_sensitivity(
-				material, width, x[1], x[2], x[3], x[3] + 100*signal_sensitivity, incident_energy,
+				material, width, x[0], x[1], lower_percentile, upper_percentile, incident_energy,
 				include_photons=True,
 				include_neutrons=not pulse_shape_discrimination,
 				include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
 			constraints=[optimize.NonlinearConstraint(
 				lambda x: calculate_thresholds(
-					material, x[0], x[1], x[2], incident_energy, 100*(1 - spectroscopic_quality))[0],
+					material, width, x[0], x[1], incident_energy, 100*(1 - spectroscopic_quality))[0],
 				lb=incident_energy - .6, ub=inf,
 			)],
-			x0=[14.0, 4.0, 6.0],
+			x0=[14.0, 4.0],
 			bounds=[
 				(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
 				(0.1, 10.0),
-				(1., 100.*(1 - signal_sensitivity)),
 			],
 			method="cobyqa",
 			options=dict(
@@ -278,7 +277,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 				final_tr_radius=1.e-4,
 			),
 		)
-		width, length, depth, lower_percentile = result.x
+		length, depth = result.x
 
 	elif mode == "strip":
 		if spectroscopic_quality > 0:
@@ -297,11 +296,11 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 			),
 		)
 		lower_percentile = result.x
+		upper_percentile = lower_percentile + 100*signal_sensitivity
 
 	else:
 		raise ValueError(f"undefined mode, {mode!r}; what _is_ that?")
 
-	upper_percentile = lower_percentile + 100*signal_sensitivity
 
 	if not result.success:
 		logging.info(f"the optimization failed for signal sensitivity of {signal_sensitivity:.3g}; {result.message}")
@@ -405,7 +404,7 @@ def calculate_background_sensitivity(
 	width = max(0.001, width)
 	depth = max(0.001, depth)
 	if use_percentiles:
-		lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, lower_percentile, upper_percentile, incident_energy)
+		lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, incident_energy, lower_percentile, upper_percentile)
 	else:
 		lower_threshold, upper_threshold = lower_percentile, upper_percentile
 	detector = Detector(

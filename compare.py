@@ -68,7 +68,7 @@ def compare():
 def evaluate_detector(material: str, width: float, length: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float, plot=False) -> tuple[float, float, float]:
 	""" calculate the range of possible background levels (per signal particle) and the total count rate of this detector """
 	lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, incident_energy, lower_percentile, upper_percentile)
-	num_background_particles = round(10_000_000/(width*depth*LENGTH)**(1/3))
+	num_background_particles = round(10_000_000/(width*depth*length)**(1/3))
 	optimistic_background = calculate_background_sensitivity(
 		material, width, length, depth, lower_threshold, upper_threshold, incident_energy,
 		include_photons=True, include_neutrons=False, include_crosstalk=False,

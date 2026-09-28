@@ -124,6 +124,8 @@ class Detector:
 		:param lower_threshold: the minimum amount of energy in a pulse to be detected (MeV)
 		:param upper_threshold: the maximum amount of energy in a pulse to be detected (MeV)
 		"""
+		if lower_threshold > upper_threshold:
+			raise ValueError("These thresholds don't make any logical sense.")
 		self.material_name = material
 		self.density = MATERIAL_DATA[material]["density"]  # g/cm³
 		self.elements = MATERIAL_DATA[material]["elements"]
