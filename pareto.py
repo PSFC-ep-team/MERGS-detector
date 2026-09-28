@@ -360,30 +360,6 @@ def calculate_thresholds(
 			)
 			thresholds[i] = threshold
 
-			if abs(threshold - percentile(energies, percentile_value)) > 1 or abs(percentile_value - 100*fraction_below(threshold)) > 1:
-				bottom = min(percentile(energies, 1.), percentile(energies, percentile_value)*0.9, threshold*0.9)
-				top = max(percentile(energies, 99.), percentile(energies, percentile_value)*1.1, threshold*1.1)
-				plt.figure()
-				plt.hist(energies, bins=linspace(bottom, top, 101))
-				plt.axvline(percentile(energies, percentile_value), color="blue", label="initial gess")
-				plt.axvline(threshold, color="orange", linestyle="--", label="final anser")
-				plt.legend()
-				plt.xlim(bottom, top)
-				plt.ylim(0, None)
-				plt.savefig(f"problem {percentile_value:.2f} density.pdf")
-				plt.figure()
-				xx = linspace(bottom, top, 201)
-				cum = 100*array([fraction_below(x) for x in xx])
-				plt.plot(xx, cum)
-				plt.axhline(percentile_value)
-				plt.axvline(percentile(energies, percentile_value), color="blue", label="initial gess")
-				plt.axvline(threshold, color="orange", linestyle="--", label="final anser")
-				plt.legend()
-				plt.xlim(bottom, top)
-				plt.ylim(0, 100)
-				plt.savefig(f"problem {percentile_value:.2f} cumulative.pdf")
-				logging.warning(f"something went wrong with the percentile calculation for {percentile_value:.2f}%.  I tried to save a plot to illustrate the issue.")
-
 			os.makedirs("results", exist_ok=True)
 			with open("results/cache.txt", mode="a") as file:
 				cache_key = (f"{material}, {width:.12g}, {length:.12g}, {depth:.12g}, "
