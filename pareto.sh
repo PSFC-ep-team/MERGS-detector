@@ -18,7 +18,11 @@ cd $HOME/MERGS-detector
 EXIT_CODE=124
 
 for i in $(seq 1 11); do
+	# delete old files
+	find run -mmin +60 -delete
+	# run the script
 	timeout 1.0h python -u pareto.py $@
+	# decide whether to keep going
 	EXIT_CODE=$?
 	if [ $EXIT_CODE -eq 124 ]; then
 		echo "Killing and restarting to clear memory."
