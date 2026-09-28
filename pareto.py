@@ -236,7 +236,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 			)],
 			x0=[4.0, 14.0, 6.0],
 			bounds=[
-				(0.1, 10.0),
+				(0.5, 10.0),
 				(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
 				(0.1, 10.0),
 			],
@@ -282,8 +282,8 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 	elif mode == "strip":
 		if spectroscopic_quality > 0:
 			raise RuntimeError("we can't make a spectrometer this thin; no way")
-		# optimize with fixed thickness, length, and width
-		width, length, depth = 0.1, 10.0, 0.1
+		# optimize with fixed dimensions
+		width, length, depth = 0.5, 10.0, 0.05 if material == "silicon" else 0.1
 		result = optimize.minimize_scalar(
 			lambda x: calculate_background_sensitivity(
 				material, width, length, depth, x, x + 100*signal_sensitivity, incident_energy,
