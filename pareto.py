@@ -207,7 +207,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 	pulse_shape_discrimination = optimistic and material.startswith("EJ")
 	if mode == "any":
 		solutions = []
-		for new_mode in ["block", "slab", "strip"]:
+		for new_mode in ["block", "strip"]:
 			try:
 				solutions.append(optimize_detector(material, signal_sensitivity, spectroscopic_quality, optimistic, new_mode, incident_energy))
 			except RuntimeError:

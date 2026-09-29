@@ -25,7 +25,7 @@ def compare():
 				width, length, depth, lower_percentile, upper_percentile, _, _ = optimize_detector(
 					material, signal_sensitivity, mode=mode,
 					spectroscopic_quality=.5 if mode != "strip" else .0, optimistic=True,
-					incident_energy=16.7)
+					incident_energy=incident_energy)
 				plot = incident_energy == 16.7 and signal_sensitivity == .80
 
 				optimistic_background_level, conservative_background_level, count_rate = evaluate_detector(
