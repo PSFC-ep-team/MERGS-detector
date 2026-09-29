@@ -171,7 +171,7 @@ def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> l
 		signal_sensitivities = 1 - linspace(1, 0, 9)[1:-1]**2
 		num_processes = min(len(signal_sensitivities), cpu_count())
 		logging.debug(f"running on {num_processes} parallel processes")
-		with Pool(processes=9) as executor:
+		with Pool(processes=num_processes) as executor:
 			results = executor.map(
 				optimize_detector_star,
 				[(material, sensitivity, 0.5 if spectrometric else 0.0, optimistic, "any", 16.7) for sensitivity in signal_sensitivities],
