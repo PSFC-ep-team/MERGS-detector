@@ -317,17 +317,18 @@ def calculate_thresholds(
 	"""
 	the thresholds that achieve the given percentiles
 	"""
+	cache_keys = []
 	thresholds = []
 	for i, percentile_value in enumerate(percentile_values):
-		cache_key = (f"{material}, {width:.12g}, {length:.12g}, {depth:.12g}, "
-		             f"{incident_energy:.12g}, {percentile_value:.12g}, thresholds")
+		cache_keys.append(f"{material}, {width:.12g}, {length:.12g}, {depth:.12g}, "
+		                  f"{incident_energy:.12g}, {percentile_value:.12g}, thresholds")
 		threshold = None
 		# first, try to load it from the cache
 		try:
 			with open("results/cache.txt", mode="r") as file:
 				for line in file.readlines():
 					input_string, output_string = line.split(" -> ")
-					if input_string == cache_key:
+					if input_string == cache_keys[i]:
 						threshold = float(output_string)
 						break
 		except FileNotFoundError:
@@ -362,9 +363,7 @@ def calculate_thresholds(
 
 			os.makedirs("results", exist_ok=True)
 			with open("results/cache.txt", mode="a") as file:
-				cache_key = (f"{material}, {width:.12g}, {length:.12g}, {depth:.12g}, "
-				             f"{incident_energy:.12g}, {percentile_value:.12g}, thresholds")
-				file.write(f"{cache_key} -> {threshold}\n")
+				file.write(f"{cache_keys[i]} -> {threshold}\n")
 
 	return tuple(thresholds)
 
