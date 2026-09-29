@@ -51,15 +51,19 @@ def evaluate_detector_concept_star(args):
 
 
 def evaluate_detector_concept(material, signal_sensitivity, mode, incident_energy):
-	width, length, depth, lower_percentile, upper_percentile, _, _ = optimize_detector(
-		material, signal_sensitivity, mode=mode,
-		spectroscopic_quality=.5 if mode != "strip" else .0, optimistic=True,
-		incident_energy=incident_energy,
-	)
-	plot = incident_energy == 16.7 and signal_sensitivity == .80
-	return evaluate_detector(
-		material, width, length, depth, lower_percentile, upper_percentile, incident_energy, plot=plot,
-	)
+	try:
+		width, length, depth, lower_percentile, upper_percentile, _, _ = optimize_detector(
+			material, signal_sensitivity, mode=mode,
+			spectroscopic_quality=.5 if mode != "strip" else .0, optimistic=True,
+			incident_energy=incident_energy,
+		)
+	except RuntimeError:
+		return inf, inf, inf
+	else:
+		plot = incident_energy == 16.7 and signal_sensitivity == .80
+		return evaluate_detector(
+			material, width, length, depth, lower_percentile, upper_percentile, incident_energy, plot=plot,
+		)
 
 
 def plot_detector_concept(
