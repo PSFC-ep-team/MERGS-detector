@@ -8,7 +8,7 @@ from typing import Callable, Literal
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, full, interp, \
-	quantile, nanmax, geomspace, percentile, inf
+	quantile, nanmax, geomspace, percentile, inf, nan
 from scipy import optimize
 from scipy.special import erf
 
@@ -87,7 +87,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 		axs[2].set_ylabel("Thresholds (MeV)")
 		axs[2].set_ylim(0, 16.7)
 		axs[2].set_xlabel("Signal sensitivity")
-		axs[2].set_xlim(None, 1)
+		axs[2].set_xlim(0, 1)
 		fig.tight_layout()
 		plt.savefig(f"figures/pareto_parameters_{'optimistic' if optimistic else 'conservative'}_{'spectrometer' if spectrometric else 'detector'}.pdf")
 
@@ -162,8 +162,13 @@ def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> l
 			optimize_detector_star,
 			[(material, sensitivity, 0.5 if spectrometric else 0.0, optimistic, "any", 16.7) for sensitivity in signal_sensitivities],
 		)
-
-	return results
+	designs = []
+	for i, sensitivity in enumerate(signal_sensitivities):
+		try:
+			designs.append(results.__next__())
+		except RuntimeError:
+			designs.append([nan, nan, nan, nan, nan, inf, inf])
+	return designs
 
 
 def optimize_detector_star(args: tuple[str, float, float, bool, str, float]):
@@ -195,6 +200,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 		width, length, depth = detector["width (cm)"], detector["length (cm)"], detector["depth (cm)"]
 		lower_threshold, upper_threshold = detector["lower threshold (MeV)"], detector["upper threshold (MeV)"]
 		background_sensitivity, signal_sensitivity = detector["background sensitivity"], detector["signal sensitivity"]
+		logging.debug("loaded a cached optimized detector")
 
 	except FileNotFoundError:
 		coincidence_counting = optimistic
@@ -302,8 +308,9 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 		else:
 			logging.info(f"after {result.nfev} steps, we found an optimum that achieves {signal_sensitivity:.3g} for signal, {result.fun:.3g} for background")
 		lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, incident_energy, lower_percentile, upper_percentile)
+		background_sensitivity = result.fun
 
-		with open(filename, "w"):
+		with open(filename, "w") as file:
 			json.dump({
 				"width (cm)": width,
 				"length (cm)": length,
@@ -312,9 +319,9 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 				"upper threshold (MeV)": upper_threshold,
 				"background sensitivity": background_sensitivity,
 				"signal sensitivity": signal_sensitivity,
-			}, file)
+			}, file, indent="\t")
 
-	return width, length, depth, lower_threshold, upper_threshold, result.fun, signal_sensitivity
+	return width, length, depth, lower_threshold, upper_threshold, background_sensitivity, signal_sensitivity
 
 
 def calculate_thresholds(
@@ -484,7 +491,7 @@ def plot_objective_space_slice(x, y, signal_sensitivities, background_sensitivit
 	fig.tight_layout()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" or __name__ == "__mp_main__":
 	os.makedirs("results", exist_ok=True)
 	logging.basicConfig(
 		level=logging.DEBUG, filename="results/out.log", encoding="utf-8",
@@ -494,6 +501,7 @@ if __name__ == "__main__":
 	logging.getLogger("matplotlib").setLevel(logging.WARNING)
 	logging.getLogger("PIL").setLevel(logging.WARNING)
 
+if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--require-spectrometry", action="store_true")
 	args = parser.parse_args()
