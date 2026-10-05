@@ -1,4 +1,6 @@
-from multiprocessing import Pool, cpu_count
+from concurrent.futures import ProcessPoolExecutor
+import logging
+import os
 
 import matplotlib.pyplot as plt
 from numpy import inf, array, empty
@@ -10,60 +12,67 @@ SIGNAL_RATE = 1  # electron/s
 IGNORABLE_PULSE_HEIGHT = 0.1  # MeV
 
 
+
 def compare():
 	material = "EJ-276D"
+	modes = ["strip", "slab", "block"]
 	signal_sensitivities = array([.25, .50, .90])
 	incident_energies = array([10, 12, 14, 16, 16.7, 18])
+
+	logging.info(f"designing {len(modes)*len(signal_sensitivities)*len(incident_energies)} {material} detectors...")
+	detector_designs = {mode: [None]*len(signal_sensitivities) for mode in modes}
+	for mode in modes:
+		for i, signal_sensitivity in enumerate(signal_sensitivities):
+			num_processes = min(len(incident_energies), os.cpu_count())
+			with ProcessPoolExecutor(max_workers=num_processes) as pool:
+				# determine the detector parameters
+				detector_designs[mode][i] = pool.map(
+					optimize_detector_star,
+					[(material, signal_sensitivity, .5 if mode != "strip" else .0, True, mode, energy) for energy in incident_energies],
+				)
+	logging.info(f"all jobs submitted")
+
+	logging.info(f"waiting for and evaluating {len(modes)*len(signal_sensitivities)*len(incident_energies)} {material} detectors...")
 	optimistic_background_levels = empty(
 		(signal_sensitivities.size, incident_energies.size),
-		dtype=[("strip", float), ("slab", float), ("block", float)])
+		dtype=[(mode, float) for mode in modes])
 	conservative_background_levels = empty(
 		(signal_sensitivities.size, incident_energies.size),
-		dtype=[("strip", float), ("slab", float), ("block", float)])
+		dtype=[(mode, float) for mode in modes])
 	count_rates = empty(
 		(signal_sensitivities.size, incident_energies.size),
-		dtype=[("strip", float), ("slab", float), ("block", float)])
-	for mode in ["strip", "slab", "block"]:
+		dtype=[(mode, float) for mode in modes])
+	for mode in modes:
 		for i, signal_sensitivity in enumerate(signal_sensitivities):
-			num_processes = min(len(signal_sensitivities), cpu_count())
-			with Pool(processes=num_processes) as pool:
-				# determine the detector parameters
-				results = pool.map(
-					evaluate_detector_concept_star,
-					[(material, signal_sensitivity, mode, energy) for energy in incident_energies],
-				)
-			for j, (optimistic_background_level, conservative_background_level, count_rate) in enumerate(results):
+			for j, incident_energy in enumerate(incident_energies):
+				try:
+					width, length, depth, lower_percentile, upper_percentile, _, _ = detector_designs[mode][i].__next__()
+				except RuntimeError:
+					optimistic_background_level, conservative_background_level, count_rate = inf, inf, inf
+				else:
+					plot = incident_energy == 16.7 and signal_sensitivity == .80
+					optimistic_background_level, conservative_background_level, count_rate = evaluate_detector(
+						material, width, length, depth, lower_percentile, upper_percentile, incident_energy, plot=plot,
+					)
 				optimistic_background_levels[mode][i, j] = optimistic_background_level
 				conservative_background_levels[mode][i, j] = conservative_background_level
 				count_rates[mode][i, j] = count_rate
+			logging.info(f"done with {signal_sensitivity:.0%} {mode}s")
 
+	logging.info(f"plotting {len(modes)*len(signal_sensitivities)*len(incident_energies)} {material} detectors...")
 	for i, signal_sensitivity in enumerate(signal_sensitivities):
 		plot_detector_concept(
 			material, signal_sensitivity, incident_energies,
 			optimistic_background_levels[i, :],
 			conservative_background_levels[i, :],
 			count_rates[i, :])
+
+	logging.info(f"done!")
 	plt.show()
 
 
-def evaluate_detector_concept_star(args):
-	return evaluate_detector_concept(*args)
-
-
-def evaluate_detector_concept(material, signal_sensitivity, mode, incident_energy):
-	try:
-		width, length, depth, lower_percentile, upper_percentile, _, _ = optimize_detector(
-			material, signal_sensitivity, mode=mode,
-			spectroscopic_quality=.5 if mode != "strip" else .0, optimistic=True,
-			incident_energy=incident_energy,
-		)
-	except RuntimeError:
-		return inf, inf, inf
-	else:
-		plot = incident_energy == 16.7 and signal_sensitivity == .80
-		return evaluate_detector(
-			material, width, length, depth, lower_percentile, upper_percentile, incident_energy, plot=plot,
-		)
+def optimize_detector_star(args):
+	return optimize_detector(*args)
 
 
 def plot_detector_concept(
@@ -131,4 +140,13 @@ def evaluate_detector(material: str, width: float, length: float, depth: float, 
 
 
 if __name__ == "__main__":
+	os.makedirs("results", exist_ok=True)
+	logging.basicConfig(
+		level=logging.DEBUG, filename="results/compare.log", encoding="utf-8",
+		datefmt="%m-%d %H:%M:%S", format="%(asctime)s %(levelname)-5.5s %(message)s")
+	logging.getLogger().addHandler(logging.StreamHandler())
+	logging.getLogger("filelock").setLevel(logging.WARNING)
+	logging.getLogger("matplotlib").setLevel(logging.WARNING)
+	logging.getLogger("PIL").setLevel(logging.WARNING)
+
 	compare()

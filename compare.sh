@@ -16,5 +16,3 @@ conda activate grasshoppenv
 cd $HOME/MERGS-detector
 
 python -u compare.py $@
-
-exit 0
