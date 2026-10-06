@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
-#SBATCH --time=05:59:00
+#SBATCH --cpus-per-task=7
+#SBATCH --time=11:59:00
 #SBATCH --partition=mit_normal
 #SBATCH --mem-per-cpu=8000
 #SBATCH --mail-type=END,FAIL,REQUEUE,TIME_LIMIT
@@ -15,4 +15,23 @@ conda activate grasshoppenv
 
 cd $HOME/MERGS-detector
 
-python -u compare.py $@
+EXIT_CODE=124
+
+for i in $(seq 1 11); do
+	# delete old files
+	find run -mmin +60 -delete
+	# run the script
+	timeout 1.0h python -u compare.py $@
+	# decide whether to keep going
+	EXIT_CODE=$?
+	if [ $EXIT_CODE -eq 124 ]; then
+		echo "Killing and restarting to clear memory."
+	else
+		echo "Python terminated with exit code $EXIT_CODE"
+		exit $EXIT_CODE
+	fi
+done
+
+echo "Our time is up but there's more work to do.  Recuing..."
+sbatch compare.sh $@
+exit 0

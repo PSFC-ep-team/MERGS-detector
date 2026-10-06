@@ -139,7 +139,7 @@ def evaluate_detector(material: str, width: float, length: float, depth: float, 
 	return optimistic_background, conservative_background, count_rate
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" or __name__ == "__mp_main__":
 	os.makedirs("results", exist_ok=True)
 	logging.basicConfig(
 		level=logging.DEBUG, filename="results/compare.log", encoding="utf-8",
@@ -149,4 +149,5 @@ if __name__ == "__main__":
 	logging.getLogger("matplotlib").setLevel(logging.WARNING)
 	logging.getLogger("PIL").setLevel(logging.WARNING)
 
+if __name__ == "__main__":
 	compare()
