@@ -7,7 +7,7 @@ from typing import Callable, Literal
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
-from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, full, interp, \
+from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, diff, interp, \
 	quantile, nanmax, geomspace, percentile, inf, nan
 from scipy import optimize
 from scipy.special import erf
@@ -20,17 +20,15 @@ from simulation import Beam, Spectrum
 plt.rcParams["font.size"] = 12
 
 FOCAL_PLANE_HEIGHT = 10  # cm
-BACKGROUND_FLUENCE = 1e+3  # particle/cm²/electron
+ELECTRON_RATE = 2.87e+10*2.4e-5*1.0e-4/10  # particle/channel/s
 
 data = loadtxt("data/background-spectrum.csv", skiprows=1, delimiter=",", quotechar='"')
 BACKGROUND_NEUTRON_SPECTRUM = Spectrum(
 	"scattered neuts", (data[:, 0] + data[:, 1])/2, data[:, 2])
 BACKGROUND_PHOTON_SPECTRUM = Spectrum(
 	"scattered phots", (data[:, 0] + data[:, 1])/2, data[:, 4])
-neutron_sum = sum(data[:, 2]*(data[:, 1] - data[:, 0]))
-photon_sum = sum(data[:, 4]*(data[:, 1] - data[:, 0]))
-NEUTRON_FRACTION = neutron_sum/(neutron_sum + photon_sum)
-PHOTON_FRACTION = photon_sum/(neutron_sum + photon_sum)
+NEUTRON_FLUX_RATE = sum(data[:, 2])/100.  # particle/cm²/s
+PHOTON_FLUX_RATE = sum(data[:, 4])/100. # particle/cm²/s
 
 
 def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometric: bool):
@@ -97,14 +95,14 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	num_electrons, num_neutrons, num_photons = 1_000_000, num_background_particles, num_background_particles
 	electron_beam = Beam("electron", tight_spectrum(incident_energy), width=detector.width, height=FOCAL_PLANE_HEIGHT, shape="rectangular")
 	electron_response, crosstalk_response = calculate_response(detector, electron_beam, num_particles=num_electrons)
-	electron_weight = 1/num_electrons
+	electron_weight = ELECTRON_RATE/num_electrons
 	world_radius = sqrt(detector.width**2 + detector.length**2 + detector.depth**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_NEUTRON_SPECTRUM, distance=world_radius, shape="ambient")
 	neutron_response, _ = calculate_response(detector, neutron_beam, num_particles=num_neutrons)
-	neutron_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/num_neutrons
+	neutron_weight = NEUTRON_FLUX_RATE*4*pi*world_radius**2/num_neutrons
 	photon_beam = Beam("photon", BACKGROUND_PHOTON_SPECTRUM, distance=world_radius, shape="ambient")
 	photon_response, _ = calculate_response(detector, photon_beam, num_particles=num_photons)
-	photon_weight = BACKGROUND_FLUENCE*4*pi*world_radius**2/num_photons
+	photon_weight = PHOTON_FLUX_RATE*4*pi*world_radius**2/num_photons
 
 	energy_bins = linspace(0.05, min(17.05, 1.5*detector.upper_threshold), 86)
 	plt.figure()
@@ -113,7 +111,7 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 		counts, _, _ = plt.hist(
 			[electron_response, crosstalk_response, photon_response, neutron_response],
 			energy_bins,
-			weights=[full(electron_response.size, electron_weight), full(crosstalk_response.size, electron_weight), full(photon_response.size, neutron_weight), full(neutron_response.size, photon_weight)],
+			weights=[electron_weight/diff(energy_bins), electron_weight/diff(energy_bins), neutron_weight/diff(energy_bins), photon_weight/diff(energy_bins)],
 			color=["tab:orange", "tab:red", "tab:green", "tab:gray"],
 			label=["Signal", "Cross-talk", "Photons", "Neutrons"] if attach_label else None,
 			histtype=histogram_type, alpha=opacity,
@@ -134,6 +132,7 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	plt.ylim(0, max(counts[i][energy_bins[1:] > detector.lower_threshold].max() for i in range(4))*1.05)
 	plt.legend()
 	plt.xlabel("Deposited energy (MeV)")
+	plt.ylabel("Counts (/MeV/s)")
 	plt.title(f"{detector.width:.1f} cm × {detector.length:.1f} cm × {detector.depth:.1f} cm {detector.material_name} detector")
 	plt.tight_layout()
 	filename = f"figures/{detector.material_name}_{detector.width:.1f}cmx{detector.length:.1f}cmx{detector.depth:.1f}cm_response.pdf"
@@ -406,16 +405,16 @@ def calculate_background_sensitivity(
 	total_detection_rate_var = 0.
 	if include_crosstalk:
 		_, _, crosstalk_sensitivity, crosstalk_sensitivity_unc = calculate_sensitivity(detector, electron_beam, num_particles=1_000_000, use_cache=True)
-		total_detection_rate += crosstalk_sensitivity
-		total_detection_rate_var += crosstalk_sensitivity_unc**2
+		total_detection_rate += ELECTRON_RATE*crosstalk_sensitivity
+		total_detection_rate_var += (ELECTRON_RATE*crosstalk_sensitivity_unc) ** 2
 	if include_neutrons:
 		neutron_sensitivity, neutron_sensitivity_unc, _, _ = calculate_sensitivity(detector, neutron_beam, num_particles=num_background_particles, use_cache=True)
-		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*neutron_sensitivity
-		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius**2*neutron_sensitivity_unc)**2
+		total_detection_rate += NEUTRON_FLUX_RATE*4*pi*world_radius**2*neutron_sensitivity
+		total_detection_rate_var += (NEUTRON_FLUX_RATE*4*pi*world_radius**2*neutron_sensitivity_unc)**2
 	if include_photons:
 		photon_sensitivity, photon_sensitivity_unc, _, _ = calculate_sensitivity(detector, photon_beam, num_particles=num_background_particles, use_cache=True)
-		total_detection_rate += BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity
-		total_detection_rate_var += (BACKGROUND_FLUENCE*4*pi*world_radius**2*photon_sensitivity_unc)**2
+		total_detection_rate += PHOTON_FLUX_RATE*4*pi*world_radius**2*photon_sensitivity
+		total_detection_rate_var += (PHOTON_FLUX_RATE*4*pi*world_radius**2*photon_sensitivity_unc)**2
 
 	total_detection_rate_unc = sqrt(total_detection_rate_var)
 	if total_detection_rate_unc > .10*total_detection_rate:
@@ -425,7 +424,7 @@ def calculate_background_sensitivity(
 			f"{detector.lower_threshold:.2g} and {detector.upper_threshold:.2g} MeV, we got an unacceptably "
 			f"uncertain anser of {total_detection_rate:.3g} ± {total_detection_rate_unc:.3g}.")
 
-	return total_detection_rate
+	return total_detection_rate/ELECTRON_RATE
 
 
 def tight_spectrum(central_energy: float, width=0.3) -> Spectrum:

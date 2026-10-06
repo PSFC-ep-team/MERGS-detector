@@ -6,11 +6,10 @@ import matplotlib.pyplot as plt
 from numpy import inf, array, empty
 
 from detector import Detector
-from pareto import calculate_background_sensitivity, plot_responses, calculate_thresholds, optimize_detector
+from pareto import calculate_background_sensitivity, plot_responses, calculate_thresholds, optimize_detector, \
+	ELECTRON_RATE
 
-SIGNAL_RATE = 1  # electron/s
 IGNORABLE_PULSE_HEIGHT = 0.1  # MeV
-
 
 
 def compare():
@@ -80,28 +79,39 @@ def plot_detector_concept(
 		optimistic_background_levels, conservative_background_levels, count_rates):
 	fig, axs = plt.subplots(nrows=2, ncols=1, sharex="all", gridspec_kw=dict(hspace=0), figsize=(6, 6))
 	axs[0].set_title(f"Counting {signal_sensitivity:.0%} of electrons")
-	axs[0].fill_between(incident_energies, optimistic_background_levels["block"], conservative_background_levels["block"], facecolor="C1", edgecolor="none", alpha=1/4)
-	axs[0].fill_between(incident_energies, optimistic_background_levels["slab"], conservative_background_levels["slab"], facecolor="C2", edgecolor="none", alpha=1/4)
-	axs[0].fill_between(incident_energies, optimistic_background_levels["strip"], conservative_background_levels["strip"], facecolor="C0", edgecolor="none", alpha=1/4)
-	axs[0].plot(incident_energies, conservative_background_levels["block"], "C1-", label="Large detector")
-	axs[0].plot(incident_energies, optimistic_background_levels["block"], "C1--")
-	axs[0].plot(incident_energies, conservative_background_levels["slab"], "C2--", label="Deep detector")
-	axs[0].plot(incident_energies, optimistic_background_levels["slab"], "C2--")
-	axs[0].plot(incident_energies, conservative_background_levels["strip"], "C0-", label="Tiny detector")
-	axs[0].plot(incident_energies, optimistic_background_levels["strip"], "C0--")
+
+	for mode, color, label in [("block", "C1", "Large detector"), ("slab", "C2", "Deep detector"), ("strip", "C0", "Tiny detector")]:
+		axs[0].plot(incident_energies, count_rates[mode], color, label=label)
 	axs[0].grid()
-	axs[0].xaxis.set_visible(False)
-	axs[0].set_yscale("log")
 	axs[0].legend()
-	axs[0].set_ylabel("Background/signal ratio")
-	axs[1].plot(incident_energies, count_rates["block"], "C1-")
-	axs[1].plot(incident_energies, count_rates["slab"], "C2-")
-	axs[1].plot(incident_energies, count_rates["strip"], "C0-")
+	axs[0].set_yscale("log")
+	axs[0].set_ylabel("Raw count rate (cps)")
+	axs[0].xaxis.set_visible(False)
+
+	for mode, color in [("block", "C1"), ("slab", "C2"), ("strip", "C0")]:
+		axs[1].fill_between(
+			incident_energies,
+			ELECTRON_RATE*optimistic_background_levels[mode],
+			ELECTRON_RATE*conservative_background_levels[mode],
+			facecolor=color, edgecolor="none", alpha=1/4)
+	for mode, color, label in [("block", "C1", "Large detector"), ("slab", "C2", "Deep detector"), ("strip", "C0", "Tiny detector")]:
+		axs[1].plot(
+			incident_energies,
+			conservative_background_levels["block"],
+			color, label=f"{label} background")
+		axs[1].plot(
+			incident_energies,
+			optimistic_background_levels["block"],
+			color)
+	axs[1].axhline(ELECTRON_RATE*signal_sensitivity, "k:", label="Signal")
 	axs[1].grid()
+	axs[1].legend()
 	axs[1].set_yscale("log")
-	axs[1].set_ylabel("Count rate (cps)")
+	axs[1].set_ylabel("Thresholded rate (cps)")
 	axs[1].set_xlim(10, 18)
 	axs[1].set_xlabel("Electron energy (MeV)")
+
+	fig.tight_layout()
 	fig.savefig(f"figures/comparison-{material}-{signal_sensitivity*100:.0f}.pdf")
 
 
@@ -119,11 +129,11 @@ def evaluate_detector(material: str, width: float, length: float, depth: float, 
 		include_photons=False, include_neutrons=True, include_crosstalk=True,
 		num_background_particles=num_background_particles,
 		use_percentiles=False)
-	count_rate = SIGNAL_RATE*calculate_background_sensitivity(
+	count_rate = ELECTRON_RATE*(1 + calculate_background_sensitivity(
 		material, width, length, depth, IGNORABLE_PULSE_HEIGHT, inf, incident_energy,
 		include_photons=True, include_neutrons=True, include_crosstalk=True,
 		num_background_particles=num_background_particles,
-		use_percentiles=False)
+		use_percentiles=False))
 
 	if plot:
 		plot_responses(
