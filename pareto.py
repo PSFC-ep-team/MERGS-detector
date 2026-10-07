@@ -157,22 +157,20 @@ def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> l
 	signal_sensitivities = 1 - linspace(1, 0, 9)[1:-1]**2
 	num_processes = min(len(signal_sensitivities), os.cpu_count())
 	logging.debug(f"running on {num_processes} parallel processes")
+	results = []
 	with ProcessPoolExecutor(max_workers=num_processes) as executor:
-		results = executor.map(
-			optimize_detector_star,
-			[(material, sensitivity, 0.5 if spectrometric else 0.0, optimistic, "any", 16.7) for sensitivity in signal_sensitivities],
-		)
-	designs = []
-	for i, sensitivity in enumerate(signal_sensitivities):
-		try:
-			designs.append(results.__next__())
-		except RuntimeError:
-			designs.append([nan, nan, nan, nan, nan, inf, inf])
+		for sensitivity in signal_sensitivities:
+			results.append(executor.submit(
+				optimize_detector,
+				material, sensitivity, 0.5 if spectrometric else 0.0, optimistic, "any", 16.7,
+			))
+		designs = []
+		for result in results:
+			try:
+				designs.append(result.result(timeout=1800))
+			except RuntimeError:
+				designs.append([nan, nan, nan, nan, nan, inf, inf])
 	return designs
-
-
-def optimize_detector_star(args: tuple[str, float, float, bool, str, float]):
-	return optimize_detector(*args)
 
 
 def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_quality: float, optimistic: bool, mode: Literal["block", "slab", "strip", "any"], incident_energy: float) -> tuple[float, float, float, float, float, float, float]:
@@ -196,6 +194,9 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 
 	try:
 		with open(filename) as file:
+			if file.read() == "FAILURE":
+				raise RuntimeError("we already tried and failed to optimize this one.")
+		with open(filename) as file:
 			detector = json.load(file)
 		width, length, depth = detector["width (cm)"], detector["length (cm)"], detector["depth (cm)"]
 		lower_threshold, upper_threshold = detector["lower threshold (MeV)"], detector["upper threshold (MeV)"]
@@ -203,110 +204,118 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 		logging.debug("loaded a cached optimized detector")
 
 	except FileNotFoundError:
+
 		coincidence_counting = optimistic
 		pulse_shape_discrimination = optimistic and material.startswith("EJ")
-		if mode == "any":
-			solutions = []
-			for new_mode in ["block", "strip"]:
-				try:
-					solutions.append(optimize_detector(material, signal_sensitivity, spectroscopic_quality, optimistic, new_mode, incident_energy))
-				except RuntimeError:
-					pass
-			if len(solutions) == 0:
-				raise RuntimeError("all of the optimizations failed.")
+		try:
+			if mode == "any":
+				solutions = []
+				for new_mode in ["block", "strip"]:
+					try:
+						solutions.append(optimize_detector(material, signal_sensitivity, spectroscopic_quality, optimistic, new_mode, incident_energy))
+					except RuntimeError:
+						pass
+				if len(solutions) == 0:
+					raise RuntimeError("all of the optimizations failed.")
+				else:
+					return min(solutions, key=lambda solution: solution[-2])
+
+			elif mode == "block":
+				if material == "silicon":
+					raise RuntimeError("silicon detectors can't be manufactured that thick.")
+
+				# optimize with fixed thresholds
+				lower_percentile, upper_percentile = 100*(1 - signal_sensitivity), 100
+				result = optimize.minimize(
+					lambda x: calculate_background_sensitivity(
+						material, x[0], x[1], x[2], lower_percentile, upper_percentile, incident_energy,
+						include_photons=True,
+						include_neutrons=not pulse_shape_discrimination,
+						include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
+					constraints=[optimize.NonlinearConstraint(
+						lambda x: calculate_thresholds(
+							material, x[0], x[1], x[2], incident_energy, 100*(1 - spectroscopic_quality))[0],
+						lb=incident_energy - .6, ub=inf,
+					)],
+					x0=[4.0, 14.0, 6.0],
+					bounds=[
+						(0.5, 10.0),
+						(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
+						(0.1, 10.0),
+					],
+					method="cobyqa",
+					options=dict(
+						initial_tr_radius=0.5,
+						final_tr_radius=1.e-4,
+					),
+				)
+				width, length, depth = result.x
+
+			elif mode == "slab":
+				if material == "silicon":
+					raise ValueError("silicon detectors can't be manufactured that thick.")
+
+				# optimize with fixed width and thresholds
+				width = 1.0
+				lower_percentile, upper_percentile = 100*(1 - signal_sensitivity), 100
+				result = optimize.minimize(
+					lambda x: calculate_background_sensitivity(
+						material, width, x[0], x[1], lower_percentile, upper_percentile, incident_energy,
+						include_photons=True,
+						include_neutrons=not pulse_shape_discrimination,
+						include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
+					constraints=[optimize.NonlinearConstraint(
+						lambda x: calculate_thresholds(
+							material, width, x[0], x[1], incident_energy, 100*(1 - spectroscopic_quality))[0],
+						lb=incident_energy - .6, ub=inf,
+					)],
+					x0=[14.0, 4.0],
+					bounds=[
+						(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
+						(0.1, 10.0),
+					],
+					method="cobyqa",
+					options=dict(
+						initial_tr_radius=0.5,
+						final_tr_radius=1.e-4,
+					),
+				)
+				length, depth = result.x
+
+			elif mode == "strip":
+				if spectroscopic_quality > 0:
+					raise RuntimeError("we can't make a spectrometer this thin; no way")
+				# optimize with fixed dimensions
+				width, length, depth = 0.5, 10.0, 0.05 if material == "silicon" else 0.1
+				result = optimize.minimize_scalar(
+					lambda x: calculate_background_sensitivity(
+						material, width, length, depth, x, x + 100*signal_sensitivity, incident_energy,
+						include_photons=True,
+						include_neutrons=not pulse_shape_discrimination,
+						include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
+					bounds=(0., 100.*(1 - signal_sensitivity)),
+					options=dict(
+						xatol=1.e-4,
+					),
+				)
+				lower_percentile = result.x
+				upper_percentile = lower_percentile + 100*signal_sensitivity
+
 			else:
-				return min(solutions, key=lambda solution: solution[-2])
-
-		elif mode == "block":
-			if material == "silicon":
-				raise RuntimeError("silicon detectors can't be manufactured that thick.")
-
-			# optimize with fixed thresholds
-			lower_percentile, upper_percentile = 100*(1 - signal_sensitivity), 100
-			result = optimize.minimize(
-				lambda x: calculate_background_sensitivity(
-					material, x[0], x[1], x[2], lower_percentile, upper_percentile, incident_energy,
-					include_photons=True,
-					include_neutrons=not pulse_shape_discrimination,
-					include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-				constraints=[optimize.NonlinearConstraint(
-					lambda x: calculate_thresholds(
-						material, x[0], x[1], x[2], incident_energy, 100*(1 - spectroscopic_quality))[0],
-					lb=incident_energy - .6, ub=inf,
-				)],
-				x0=[4.0, 14.0, 6.0],
-				bounds=[
-					(0.5, 10.0),
-					(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
-					(0.1, 10.0),
-				],
-				method="cobyqa",
-				options=dict(
-					initial_tr_radius=0.5,
-					final_tr_radius=1.e-4,
-				),
-			)
-			width, length, depth = result.x
-
-		elif mode == "slab":
-			if material == "silicon":
-				raise ValueError("silicon detectors can't be manufactured that thick.")
-
-			# optimize with fixed width and thresholds
-			width = 1.0
-			lower_percentile, upper_percentile = 100*(1 - signal_sensitivity), 100
-			result = optimize.minimize(
-				lambda x: calculate_background_sensitivity(
-					material, width, x[0], x[1], lower_percentile, upper_percentile, incident_energy,
-					include_photons=True,
-					include_neutrons=not pulse_shape_discrimination,
-					include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-				constraints=[optimize.NonlinearConstraint(
-					lambda x: calculate_thresholds(
-						material, width, x[0], x[1], incident_energy, 100*(1 - spectroscopic_quality))[0],
-					lb=incident_energy - .6, ub=inf,
-				)],
-				x0=[14.0, 4.0],
-				bounds=[
-					(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
-					(0.1, 10.0),
-				],
-				method="cobyqa",
-				options=dict(
-					initial_tr_radius=0.5,
-					final_tr_radius=1.e-4,
-				),
-			)
-			length, depth = result.x
-
-		elif mode == "strip":
-			if spectroscopic_quality > 0:
-				raise RuntimeError("we can't make a spectrometer this thin; no way")
-			# optimize with fixed dimensions
-			width, length, depth = 0.5, 10.0, 0.05 if material == "silicon" else 0.1
-			result = optimize.minimize_scalar(
-				lambda x: calculate_background_sensitivity(
-					material, width, length, depth, x, x + 100*signal_sensitivity, incident_energy,
-					include_photons=True,
-					include_neutrons=not pulse_shape_discrimination,
-					include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-				bounds=(0., 100.*(1 - signal_sensitivity)),
-				options=dict(
-					xatol=1.e-4,
-				),
-			)
-			lower_percentile = result.x
-			upper_percentile = lower_percentile + 100*signal_sensitivity
-
-		else:
-			raise ValueError(f"undefined mode, {mode!r}; what _is_ that?")
+				raise ValueError(f"undefined mode, {mode!r}; what _is_ that?")
 
 
-		if not result.success:
-			logging.info(f"the optimization failed after {result.nfev} steps for signal sensitivity of {signal_sensitivity:.3g}; {result.message}")
-			raise RuntimeError(result.message)
-		else:
-			logging.info(f"after {result.nfev} steps, we found an optimum that achieves {signal_sensitivity:.3g} for signal, {result.fun:.3g} for background")
+			if not result.success:
+				logging.info(f"the optimization failed after {result.nfev} steps for signal sensitivity of {signal_sensitivity:.3g}; {result.message}")
+				raise RuntimeError(result.message)
+			else:
+				logging.info(f"after {result.nfev} steps, we found an optimum that achieves {signal_sensitivity:.3g} for signal, {result.fun:.3g} for background")
+
+		except RuntimeError:
+			with open(filename, "w") as file:
+				file.write("FAILURE")
+			raise
+
 		lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, incident_energy, lower_percentile, upper_percentile)
 		background_sensitivity = result.fun
 
