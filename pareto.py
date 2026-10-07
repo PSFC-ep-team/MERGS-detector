@@ -203,7 +203,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 		logging.debug("loaded a cached optimized detector")
 
 	except FileNotFoundError:
-		logging.debug(f"commencing a new {mode} optimization")
+		logging.debug(f"commencing a new {'optimistic' if optimistic else 'conservative'} {material} {mode} optimization for {signal_sensitivity:.0%} sensitivity and {spectroscopic_quality:.0%} spectrometry for {incident_energy:.1f} MeV electrons")
 		coincidence_counting = optimistic
 		pulse_shape_discrimination = optimistic and material.startswith("EJ")
 		try:
@@ -502,7 +502,7 @@ def plot_objective_space_slice(x, y, signal_sensitivities, background_sensitivit
 if __name__ == "__main__" or __name__ == "__mp_main__":
 	os.makedirs("results", exist_ok=True)
 	logging.basicConfig(
-		level=logging.DEBUG, filename="results/out.log", encoding="utf-8",
+		level=logging.DEBUG, filename="results/pareto.log", encoding="utf-8",
 		datefmt="%m-%d %H:%M:%S", format="%(asctime)s %(levelname)-5.5s %(message)s")
 	logging.getLogger().addHandler(logging.StreamHandler())
 	logging.getLogger("filelock").setLevel(logging.WARNING)
