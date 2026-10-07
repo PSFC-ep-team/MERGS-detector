@@ -19,19 +19,6 @@ def compare():
 	incident_energies = array([10, 12, 14, 16, 16.7, 18])
 
 	logging.info(f"designing {len(modes)*len(signal_sensitivities)*len(incident_energies)} {material} detectors...")
-	detector_designs = {mode: [None]*len(signal_sensitivities) for mode in modes}
-	for mode in modes:
-		for i, signal_sensitivity in enumerate(signal_sensitivities):
-			num_processes = min(len(incident_energies), os.cpu_count())
-			with ProcessPoolExecutor(max_workers=num_processes) as pool:
-				# determine the detector parameters
-				detector_designs[mode][i] = pool.map(
-					optimize_detector_star,
-					[(material, signal_sensitivity, .5 if mode != "strip" else .0, True, mode, energy) for energy in incident_energies],
-				)
-	logging.info(f"all jobs submitted")
-
-	logging.info(f"waiting for and evaluating {len(modes)*len(signal_sensitivities)*len(incident_energies)} {material} detectors...")
 	optimistic_background_levels = empty(
 		(signal_sensitivities.size, incident_energies.size),
 		dtype=[(mode, float) for mode in modes])
@@ -43,22 +30,32 @@ def compare():
 		dtype=[(mode, float) for mode in modes])
 	for mode in modes:
 		for i, signal_sensitivity in enumerate(signal_sensitivities):
-			for j, incident_energy in enumerate(incident_energies):
-				try:
-					width, length, depth, lower_percentile, upper_percentile, _, _ = detector_designs[mode][i].__next__()
-				except RuntimeError:
-					optimistic_background_level, conservative_background_level, count_rate = inf, inf, inf
-				else:
-					plot = incident_energy == 16.7 and signal_sensitivity == .80
-					optimistic_background_level, conservative_background_level, count_rate = evaluate_detector(
-						material, width, length, depth, lower_percentile, upper_percentile, incident_energy, plot=plot,
-					)
-				optimistic_background_levels[mode][i, j] = optimistic_background_level
-				conservative_background_levels[mode][i, j] = conservative_background_level
-				count_rates[mode][i, j] = count_rate
+			num_processes = min(len(incident_energies), os.cpu_count())
+			# determine the detector parameters
+			with ProcessPoolExecutor(max_workers=num_processes) as pool:
+				results = []
+				for energy in incident_energies:
+					results.append(pool.submit(
+						optimize_detector,
+						material, signal_sensitivity, .5 if mode != "strip" else .0, True, mode, energy,
+					))
+				for j, (energy, result) in enumerate(zip(incident_energies, results)):
+					try:
+						width, length, depth, lower_percentile, upper_percentile, _, _ = result.result(timeout=1800)
+					except RuntimeError:
+						optimistic_background_level, conservative_background_level, count_rate = inf, inf, inf
+					else:
+						plot = energy == 16.7 and signal_sensitivity == .80
+						optimistic_background_level, conservative_background_level, count_rate = evaluate_detector(
+							material, width, length, depth, lower_percentile, upper_percentile, energy, plot=plot,
+						)
+					optimistic_background_levels[mode][i, j] = optimistic_background_level
+					conservative_background_levels[mode][i, j] = conservative_background_level
+					count_rates[mode][i, j] = count_rate
 			logging.info(f"done with {signal_sensitivity:.0%} {mode}s")
+	logging.info(f"all jobs completed")
 
-	logging.info(f"plotting {len(modes)*len(signal_sensitivities)*len(incident_energies)} {material} detectors...")
+	logging.info(f"plotting summary of {len(modes)*len(signal_sensitivities)*len(incident_energies)} {material} detectors...")
 	for i, signal_sensitivity in enumerate(signal_sensitivities):
 		plot_detector_concept(
 			material, signal_sensitivity, incident_energies,
@@ -136,6 +133,7 @@ def evaluate_detector(material: str, width: float, length: float, depth: float, 
 		use_percentiles=False))
 
 	if plot:
+		logging.debug("plotting the histogram for a detector...")
 		plot_responses(
 			Detector(
 				material, width, depth, length,
@@ -144,7 +142,7 @@ def evaluate_detector(material: str, width: float, length: float, depth: float, 
 			num_background_particles=num_background_particles,
 			incident_energy=incident_energy,
 		)
-		print(f"{width:.1f} cm × {depth:.1f} cm detector: B/S = {optimistic_background:.2g}–{conservative_background:.2g}; total signal rate = {count_rate:.2g} cps")
+		logging.info(f"{width:.1f} cm × {depth:.1f} cm detector: B/S = {optimistic_background:.2g}–{conservative_background:.2g}; total signal rate = {count_rate:.2g} cps")
 
 	return optimistic_background, conservative_background, count_rate
 

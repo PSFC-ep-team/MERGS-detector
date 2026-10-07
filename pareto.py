@@ -203,7 +203,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 		logging.debug("loaded a cached optimized detector")
 
 	except FileNotFoundError:
-
+		logging.debug(f"commencing a new {mode} optimization")
 		coincidence_counting = optimistic
 		pulse_shape_discrimination = optimistic and material.startswith("EJ")
 		try:
