@@ -8,7 +8,7 @@ from typing import Callable, Literal
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, diff, interp, \
-	quantile, nanmax, geomspace, percentile, inf, nan
+	quantile, nanmax, geomspace, percentile, inf, nan, histogram
 from scipy import optimize
 from scipy.special import erf
 
@@ -107,29 +107,32 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	energy_bins = linspace(0.05, min(17.05, 1.5*detector.upper_threshold), 86)
 	plt.figure()
 	# plot the histograms
-	for histogram_type, opacity, attach_label in [("stepfilled", 1/4, False), ("step", 1, True)]:
-		counts, _, _ = plt.hist(
-			[electron_response, crosstalk_response, photon_response, neutron_response],
-			energy_bins,
-			weights=[electron_weight/diff(energy_bins), electron_weight/diff(energy_bins), neutron_weight/diff(energy_bins), photon_weight/diff(energy_bins)],
-			color=["tab:orange", "tab:red", "tab:green", "tab:gray"],
-			label=["Signal", "Cross-talk", "Photons", "Neutrons"] if attach_label else None,
-			histtype=histogram_type, alpha=opacity,
-		)
+	counts = {}
+	particles = [
+		(electron_response, electron_weight, "tab:orange", "Signal"),
+		(crosstalk_response, electron_weight, "tab:red", "Cross-talk"),
+		(photon_response, photon_weight, "tab:green", "Photons"),
+		(neutron_response, neutron_weight, "tab:gray", "Neutrons"),
+	]
+	for response, weight, color, label in particles:
+		counts[label] = weight*histogram(response, energy_bins, density=True)[0]
+		plt.stairs(counts[label], energy_bins, fill=True, color=color, alpha=1/4, label=label)
+	for response, weight, color, label in particles:
+		plt.stairs(counts[label], energy_bins, fill=False, color=color, alpha=1)
 	# plot the thresholds
 	plt.axvline(detector.lower_threshold, linestyle="--", color="k")
 	plt.axvline(detector.upper_threshold, linestyle="--", color="k")
 	# plot the energy uncertainty at each threshold
 	efficiency = MATERIAL_DATA[detector.material_name]["efficiency"]
 	plt.errorbar(
-		detector.lower_threshold, counts[0].max()*2/3,
+		detector.lower_threshold, counts["Signal"].max()*2/3,
 		xerr=sqrt(detector.lower_threshold/efficiency), color="k", capsize=5)
 	plt.errorbar(
-		detector.upper_threshold, counts[0].max()*2/3,
+		detector.upper_threshold, counts["Signal"].max()*2/3,
 		xerr=sqrt(detector.upper_threshold/efficiency), color="k", capsize=5)
 	# adjust the axes
 	plt.xlim(0, min(1.5*detector.upper_threshold, 18))
-	plt.ylim(0, max(counts[i][energy_bins[1:] > detector.lower_threshold].max() for i in range(4))*1.05)
+	plt.ylim(0, max(count[energy_bins[1:] > detector.lower_threshold].max() for count in counts.values())*1.05)
 	plt.legend()
 	plt.xlabel("Deposited energy (MeV)")
 	plt.ylabel("Counts (/MeV/s)")
@@ -302,7 +305,6 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 
 			else:
 				raise ValueError(f"undefined mode, {mode!r}; what _is_ that?")
-
 
 			if not result.success:
 				logging.info(f"the optimization failed after {result.nfev} steps for signal sensitivity of {signal_sensitivity:.3g}; {result.message}")
