@@ -44,6 +44,9 @@ def compare():
 						width, length, depth, lower_percentile, upper_percentile, _, _ = result.result(timeout=1800)
 					except RuntimeError:
 						optimistic_background_level, conservative_background_level, count_rate = inf, inf, inf
+					except TimeoutError:
+						logging.warning("I think one of the optimizations may have crashed.  I'm sorry; I don't know what to do about that.")
+						optimistic_background_level, conservative_background_level, count_rate = inf, inf, inf
 					else:
 						plot = energy == 16.7 and signal_sensitivity == .80
 						optimistic_background_level, conservative_background_level, count_rate = evaluate_detector(

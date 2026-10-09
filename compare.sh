@@ -19,7 +19,9 @@ EXIT_CODE=124
 
 for i in $(seq 1 11); do
 	# delete old files
-	find run -mmin +60 -delete
+  if [ -d run ]; then
+	  find run -mmin +60 -delete
+  fi
 	# run the script
 	timeout 1.0h python -u compare.py $@
 	# decide whether to keep going
