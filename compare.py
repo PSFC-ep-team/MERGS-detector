@@ -31,30 +31,33 @@ def compare():
 	for mode in modes:
 		for i, signal_sensitivity in enumerate(signal_sensitivities):
 			num_processes = min(len(incident_energies), os.cpu_count())
-			# determine the detector parameters
-			with ProcessPoolExecutor(max_workers=num_processes) as pool:
-				results = []
-				for energy in incident_energies:
-					results.append(pool.submit(
-						optimize_detector,
-						material, signal_sensitivity, .5 if mode != "strip" else .0, True, mode, energy,
-					))
-				for j, (energy, result) in enumerate(zip(incident_energies, results)):
-					try:
-						width, length, depth, lower_percentile, upper_percentile, _, _ = result.result(timeout=1800)
-					except RuntimeError:
-						optimistic_background_level, conservative_background_level, count_rate = inf, inf, inf
-					except TimeoutError:
-						logging.warning("I think one of the optimizations may have crashed.  I'm sorry; I don't know what to do about that.")
-						optimistic_background_level, conservative_background_level, count_rate = inf, inf, inf
-					else:
-						plot = energy == 16.7 and signal_sensitivity == .80
-						optimistic_background_level, conservative_background_level, count_rate = evaluate_detector(
-							material, width, length, depth, lower_percentile, upper_percentile, energy, plot=plot,
-						)
-					optimistic_background_levels[mode][i, j] = optimistic_background_level
-					conservative_background_levels[mode][i, j] = conservative_background_level
-					count_rates[mode][i, j] = count_rate
+			for optimistic in [True, False]:
+				# determine the detector parameters
+				with ProcessPoolExecutor(max_workers=num_processes) as pool:
+					results = []
+					for energy in incident_energies:
+						results.append(pool.submit(
+							optimize_detector,
+							material, signal_sensitivity, .5 if mode != "strip" else .0, optimistic, mode, energy,
+						))
+					for j, (energy, result) in enumerate(zip(incident_energies, results)):
+						try:
+							width, length, depth, lower_percentile, upper_percentile, _, _ = result.result(timeout=1800)
+						except RuntimeError:
+							background_level, count_rate = inf, inf
+						except TimeoutError:
+							logging.warning("I think one of the optimizations may have crashed.  I'm sorry; I don't know what to do about that.")
+							background_level, count_rate = inf, inf
+						else:
+							plot = energy == 16.7 and signal_sensitivity == .80
+							background_level, count_rate = evaluate_detector(
+								material, width, length, depth, lower_percentile, upper_percentile, energy, optimistic=optimistic, plot=plot,
+							)
+						if optimistic:
+							optimistic_background_levels[mode][i, j] = background_level
+							count_rates[mode][i, j] = count_rate
+						else:
+							conservative_background_levels[mode][i, j] = background_level
 			logging.info(f"done with {signal_sensitivity:.0%} {mode}s")
 	logging.info(f"all jobs completed")
 
@@ -80,7 +83,7 @@ def plot_detector_concept(
 	fig, axs = plt.subplots(nrows=2, ncols=1, sharex="all", gridspec_kw=dict(hspace=0), figsize=(6, 6))
 	axs[0].set_title(f"Counting {signal_sensitivity:.0%} of electrons")
 
-	for mode, color, label in [("block", "C1", "Large detector"), ("strip", "C0", "Tiny detector")]:
+	for mode, color, label in [("block", "#dfa11a", "Large detector"), ("strip", "#3382d7", "Tiny detector")]:
 		axs[0].plot(incident_energies, count_rates[mode], color, label=label)
 	axs[0].grid()
 	axs[0].legend()
@@ -88,13 +91,13 @@ def plot_detector_concept(
 	axs[0].set_ylabel("Total count rate (s⁻¹)")
 	axs[0].xaxis.set_visible(False)
 
-	for mode, color in [("block", "C1"), ("strip", "C0")]:
+	for mode, color in [("block", "#dfa11a"), ("strip", "#3382d7")]:
 		axs[1].fill_between(
 			incident_energies,
 			ELECTRON_RATE*optimistic_background_levels[mode],
 			ELECTRON_RATE*conservative_background_levels[mode],
 			facecolor=color, edgecolor="none", alpha=1/4)
-	for mode, color, label in [("block", "C1", "Large detector"), ("strip", "C0", "Tiny detector")]:
+	for mode, color, label in [("block", "#dfa11a", "Large detector"), ("strip", "#3382d7", "Tiny detector")]:
 		axs[1].plot(
 			incident_energies,
 			ELECTRON_RATE*conservative_background_levels[mode],
@@ -103,7 +106,7 @@ def plot_detector_concept(
 			incident_energies,
 			ELECTRON_RATE*optimistic_background_levels[mode],
 			color)
-	axs[1].axhline(ELECTRON_RATE*signal_sensitivity, color="k", linestyle="dotted", label="Signal")
+	axs[1].axhline(ELECTRON_RATE*signal_sensitivity, color="k", linestyle="dashed", label="Signal")
 	axs[1].grid()
 	axs[1].legend()
 	axs[1].set_yscale("log")
@@ -115,18 +118,13 @@ def plot_detector_concept(
 	fig.savefig(f"figures/comparison-{material}-{signal_sensitivity*100:.0f}.pdf")
 
 
-def evaluate_detector(material: str, width: float, length: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float, plot=False) -> tuple[float, float, float]:
+def evaluate_detector(material: str, width: float, length: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float, optimistic: bool, plot=False) -> tuple[float, float]:
 	""" calculate the range of possible background levels (per signal particle) and the total count rate of this detector """
 	lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, incident_energy, lower_percentile, upper_percentile)
 	num_background_particles = round(10_000_000/(width*depth*length)**(1/3))
-	optimistic_background = calculate_background_sensitivity(
+	background = calculate_background_sensitivity(
 		material, width, length, depth, lower_threshold, upper_threshold, incident_energy,
-		include_photons=True, include_neutrons=False, include_crosstalk=False,
-		num_background_particles=num_background_particles,
-		use_percentiles=False)
-	conservative_background = optimistic_background + calculate_background_sensitivity(
-		material, width, length, depth, lower_threshold, upper_threshold, incident_energy,
-		include_photons=False, include_neutrons=True, include_crosstalk=True,
+		include_photons=True, include_neutrons=not optimistic, include_crosstalk=not optimistic,
 		num_background_particles=num_background_particles,
 		use_percentiles=False)
 	count_rate = ELECTRON_RATE*(1 + calculate_background_sensitivity(
@@ -145,9 +143,9 @@ def evaluate_detector(material: str, width: float, length: float, depth: float, 
 			num_background_particles=num_background_particles,
 			incident_energy=incident_energy,
 		)
-		logging.info(f"{width:.1f} cm × {depth:.1f} cm detector: B/S = {optimistic_background:.2g}–{conservative_background:.2g}; total signal rate = {count_rate:.2g} cps")
+		logging.info(f"{width:.1f} cm × {depth:.1f} cm detector: B/S = {background:.2g}; total signal rate = {count_rate:.2g} cps")
 
-	return optimistic_background, conservative_background, count_rate
+	return background, count_rate
 
 
 if __name__ == "__main__" or __name__ == "__mp_main__":

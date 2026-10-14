@@ -194,7 +194,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 	"""
 	os.makedirs("results/detectors", exist_ok=True)
 
-	filename = f"results/detectors/optimal_{signal_sensitivity*100:.0f}pc_{incident_energy:.0f}MeV_{material}_{mode}_{spectroscopic_quality*100:.0f}.txt"
+	filename = f"results/detectors/optimal_{'optimistic' if optimistic else 'conservative'}_{signal_sensitivity*100:.0f}pc_{incident_energy:.0f}MeV_{material}_{mode}_{spectroscopic_quality*100:.0f}.txt"
 
 	try:
 		with open(filename) as file:
