@@ -85,7 +85,7 @@ def plot_detector_concept(
 	axs[0].grid()
 	axs[0].legend()
 	axs[0].set_yscale("log")
-	axs[0].set_ylabel("Raw count rate (cps)")
+	axs[0].set_ylabel("Total count rate (s⁻¹)")
 	axs[0].xaxis.set_visible(False)
 
 	for mode, color in [("block", "C1"), ("slab", "C2"), ("strip", "C0")]:
@@ -97,17 +97,17 @@ def plot_detector_concept(
 	for mode, color, label in [("block", "C1", "Large detector"), ("slab", "C2", "Deep detector"), ("strip", "C0", "Tiny detector")]:
 		axs[1].plot(
 			incident_energies,
-			conservative_background_levels["block"],
+			ELECTRON_RATE*conservative_background_levels[mode],
 			color, label=f"{label} background")
 		axs[1].plot(
 			incident_energies,
-			optimistic_background_levels["block"],
+			ELECTRON_RATE*optimistic_background_levels[mode],
 			color)
-	axs[1].axhline(ELECTRON_RATE*signal_sensitivity, "k:", label="Signal")
+	axs[1].axhline(ELECTRON_RATE*signal_sensitivity, color="k", linestyle="dotted", label="Signal")
 	axs[1].grid()
 	axs[1].legend()
 	axs[1].set_yscale("log")
-	axs[1].set_ylabel("Thresholded rate (cps)")
+	axs[1].set_ylabel("Thresholded count rate (s⁻¹)")
 	axs[1].set_xlim(10, 18)
 	axs[1].set_xlabel("Electron energy (MeV)")
 
