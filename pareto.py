@@ -178,7 +178,7 @@ def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> l
 	return designs
 
 
-def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_quality: float, optimistic: bool, mode: Literal["block", "slab", "strip", "any"], incident_energy: float) -> tuple[float, float, float, float, float, float, float]:
+def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_quality: float, optimistic: bool, mode: Literal["block", "strip", "any"], incident_energy: float) -> tuple[float, float, float, float, float, float, float]:
 	"""
 	get the optimal dimensions and thresholds for a detector of the given material with at least the given signal sensitivity
 	:param material: the name of the active volume material
@@ -187,7 +187,6 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 	:param optimistic: whether we assume we can use pulse shape discrimination and coincidence subtraction
 	:param mode: which set of free parameters and constraints to use.  one of:
 	             - "block" – a large chunky detector designed to fully stop the electrons, which will probably not get much spacial information
-	             - "slab" – a deep but thin detector designed to get some spacial information and also get spectral information in combination with its neibors
 	             - "strip" – a tiny detector designed to forsake spectral information and minimize background
 	             - "any" – it will pick whichever one has the best backgroud performance
 	:param incident_energy: the electron energy being optimized for (MeV)
@@ -256,37 +255,6 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 						),
 					)
 					width, length, depth = result.x
-
-				elif mode == "slab":
-					if material == "silicon":
-						raise ValueError("silicon detectors can't be manufactured that thick.")
-
-					# optimize with fixed width and thresholds
-					width = 1.0
-					lower_percentile, upper_percentile = 100*(1 - signal_sensitivity), 100
-					result = optimize.minimize(
-						lambda x: calculate_background_sensitivity(
-							material, width, x[0], x[1], lower_percentile, upper_percentile, incident_energy,
-							include_photons=True,
-							include_neutrons=not pulse_shape_discrimination,
-							include_crosstalk=not coincidence_counting),  # find the lowest background sensitivity
-						constraints=[optimize.NonlinearConstraint(
-							lambda x: calculate_thresholds(
-								material, width, x[0], x[1], incident_energy, 100*(1 - spectroscopic_quality))[0],
-							lb=incident_energy - .6, ub=inf,
-						)],
-						x0=[14.0, 4.0],
-						bounds=[
-							(FOCAL_PLANE_HEIGHT, FOCAL_PLANE_HEIGHT + 10.0),
-							(0.1, 10.0),
-						],
-						method="cobyqa",
-						options=dict(
-							initial_tr_radius=0.5,
-							final_tr_radius=1.e-4,
-						),
-					)
-					length, depth = result.x
 
 				elif mode == "strip":
 					if spectroscopic_quality > 0:

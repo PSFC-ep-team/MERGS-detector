@@ -14,7 +14,7 @@ IGNORABLE_PULSE_HEIGHT = 0.1  # MeV
 
 def compare():
 	material = "EJ-276D"
-	modes = ["strip", "slab", "block"]
+	modes = ["strip", "block"]
 	signal_sensitivities = array([.25, .50, .90])
 	incident_energies = array([10, 12, 14, 16, 16.7, 18])
 
@@ -80,7 +80,7 @@ def plot_detector_concept(
 	fig, axs = plt.subplots(nrows=2, ncols=1, sharex="all", gridspec_kw=dict(hspace=0), figsize=(6, 6))
 	axs[0].set_title(f"Counting {signal_sensitivity:.0%} of electrons")
 
-	for mode, color, label in [("block", "C1", "Large detector"), ("slab", "C2", "Deep detector"), ("strip", "C0", "Tiny detector")]:
+	for mode, color, label in [("block", "C1", "Large detector"), ("strip", "C0", "Tiny detector")]:
 		axs[0].plot(incident_energies, count_rates[mode], color, label=label)
 	axs[0].grid()
 	axs[0].legend()
@@ -88,13 +88,13 @@ def plot_detector_concept(
 	axs[0].set_ylabel("Total count rate (s⁻¹)")
 	axs[0].xaxis.set_visible(False)
 
-	for mode, color in [("block", "C1"), ("slab", "C2"), ("strip", "C0")]:
+	for mode, color in [("block", "C1"), ("strip", "C0")]:
 		axs[1].fill_between(
 			incident_energies,
 			ELECTRON_RATE*optimistic_background_levels[mode],
 			ELECTRON_RATE*conservative_background_levels[mode],
 			facecolor=color, edgecolor="none", alpha=1/4)
-	for mode, color, label in [("block", "C1", "Large detector"), ("slab", "C2", "Deep detector"), ("strip", "C0", "Tiny detector")]:
+	for mode, color, label in [("block", "C1", "Large detector"), ("strip", "C0", "Tiny detector")]:
 		axs[1].plot(
 			incident_energies,
 			ELECTRON_RATE*conservative_background_levels[mode],
