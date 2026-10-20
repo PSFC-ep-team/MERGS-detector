@@ -1,15 +1,22 @@
 from concurrent.futures import ProcessPoolExecutor
 import logging
 import os
+from typing import Literal
 
 import matplotlib.pyplot as plt
-from numpy import inf, array, empty
+from numpy import inf, array, empty, interp, loadtxt
 
 from detector import Detector
 from pareto import calculate_background_sensitivity, plot_responses, calculate_thresholds, optimize_detector, \
 	ELECTRON_RATE
 
+plt.rcParams["font.size"] = 11
+
 IGNORABLE_PULSE_HEIGHT = 0.1  # MeV
+
+_, spectrum_0 = loadtxt("data/gamma0_spectrum_interpol.dat", unpack=True)
+spectrum_energy, spectrum_1 = loadtxt("data/gamma1_spectrum_interpol.dat", unpack=True)
+spectrum = spectrum_0 + spectrum_1
 
 
 def compare():
@@ -33,33 +40,29 @@ def compare():
 			num_processes = min(len(incident_energies), os.cpu_count())
 			for optimistic in [True, False]:
 				# determine the detector parameters
+				logging.info(f"launching {num_processes} simultaneus {'optimistic' if optimistic else 'conservative'} {signal_sensitivity:.0%} {mode} optimizations...")
 				with ProcessPoolExecutor(max_workers=num_processes) as pool:
 					results = []
 					for energy in incident_energies:
 						results.append(pool.submit(
-							optimize_detector,
+							optimize_and_evaluate_detector,
 							material, signal_sensitivity, .5 if mode != "strip" else .0, optimistic, mode, energy,
 						))
 					for j, (energy, result) in enumerate(zip(incident_energies, results)):
 						try:
-							width, length, depth, lower_percentile, upper_percentile, _, _ = result.result(timeout=1800)
+							background_level, count_rate = result.result(timeout=1800)
 						except RuntimeError:
 							background_level, count_rate = inf, inf
 						except TimeoutError:
 							logging.warning("I think one of the optimizations may have crashed.  I'm sorry; I don't know what to do about that.")
 							background_level, count_rate = inf, inf
-						else:
-							plot = energy == 16.7 and signal_sensitivity == .80
-							background_level, count_rate = evaluate_detector(
-								material, width, length, depth, lower_percentile, upper_percentile, energy, optimistic=optimistic, plot=plot,
-							)
 						if optimistic:
 							optimistic_background_levels[mode][i, j] = background_level
 							count_rates[mode][i, j] = count_rate
 						else:
 							conservative_background_levels[mode][i, j] = background_level
-			logging.info(f"done with {signal_sensitivity:.0%} {mode}s")
-	logging.info(f"all jobs completed")
+				logging.info(f"done with {'optimistic' if optimistic else 'conservative'} {signal_sensitivity:.0%} {mode}s!")
+	logging.info(f"all jobs completed!")
 
 	logging.info(f"plotting summary of {len(modes)*len(signal_sensitivities)*len(incident_energies)} {material} detectors...")
 	for i, signal_sensitivity in enumerate(signal_sensitivities):
@@ -73,23 +76,25 @@ def compare():
 	plt.show()
 
 
-def optimize_detector_star(args):
-	return optimize_detector(*args)
+def optimize_and_evaluate_detector(material: str, signal_sensitivity: float, spectrometric_quality: float, optimistic: bool, mode: Literal["any", "strip", "block"], energy: float) -> tuple[float, float]:
+	width, length, depth, lower_percentile, upper_percentile, _, _ = optimize_detector(material, signal_sensitivity, spectrometric_quality, optimistic, mode, energy)
+	return evaluate_detector(
+		material, width, length, depth, lower_percentile, upper_percentile, energy, optimistic=optimistic,
+		plot=energy == 16.7 and signal_sensitivity == .80 and optimistic)
 
 
 def plot_detector_concept(
 		material, signal_sensitivity, incident_energies,
 		optimistic_background_levels, conservative_background_levels, count_rates):
-	fig, axs = plt.subplots(nrows=2, ncols=1, sharex="all", gridspec_kw=dict(hspace=0), figsize=(6, 6))
-	axs[0].set_title(f"Counting {signal_sensitivity:.0%} of electrons")
+	fig, axs = plt.subplots(nrows=2, ncols=1, sharex="all", gridspec_kw=dict(hspace=0), figsize=(5.0, 5.0))
 
-	for mode, color, label in [("block", "#dfa11a", "Large detector"), ("strip", "#3382d7", "Tiny detector")]:
+	for mode, color, label in [("block", "#dfa11a", "Large detector"), ("strip", "#3382d7", "Strip detector")]:
 		axs[0].plot(incident_energies, count_rates[mode], color, label=label)
 	axs[0].grid()
 	axs[0].legend()
 	axs[0].set_yscale("log")
 	axs[0].set_ylabel("Total count rate (s⁻¹)")
-	axs[0].xaxis.set_visible(False)
+	axs[0].xaxis.set_ticks_position("none")
 
 	for mode, color in [("block", "#dfa11a"), ("strip", "#3382d7")]:
 		axs[1].fill_between(
@@ -97,16 +102,19 @@ def plot_detector_concept(
 			ELECTRON_RATE*optimistic_background_levels[mode],
 			ELECTRON_RATE*conservative_background_levels[mode],
 			facecolor=color, edgecolor="none", alpha=1/4)
-	for mode, color, label in [("block", "#dfa11a", "Large detector"), ("strip", "#3382d7", "Tiny detector")]:
+	for mode, color, label in [("block", "#dfa11a", "Large detector"), ("strip", "#3382d7", "Strip detector")]:
 		axs[1].plot(
 			incident_energies,
 			ELECTRON_RATE*conservative_background_levels[mode],
-			color, label=f"{label} background")
+			color, linewidth=1, label=f"{label} background")
 		axs[1].plot(
 			incident_energies,
 			ELECTRON_RATE*optimistic_background_levels[mode],
-			color)
-	axs[1].axhline(ELECTRON_RATE*signal_sensitivity, color="k", linestyle="dashed", label="Signal")
+			color, linewidth=1)
+	axs[1].plot(
+		spectrum_energy,
+		ELECTRON_RATE*signal_sensitivity*spectrum/spectrum.max(),
+		color="k", linewidth=1.5, linestyle="dashed", label="Signal")
 	axs[1].grid()
 	axs[1].legend()
 	axs[1].set_yscale("log")
@@ -137,7 +145,7 @@ def evaluate_detector(material: str, width: float, length: float, depth: float, 
 		logging.debug("plotting the histogram for a detector...")
 		plot_responses(
 			Detector(
-				material, width, depth, length,
+				material, width, length, depth,
 				lower_threshold=lower_threshold, upper_threshold=upper_threshold,
 			),
 			num_background_particles=num_background_particles,
@@ -152,7 +160,7 @@ if __name__ == "__main__" or __name__ == "__mp_main__":
 	os.makedirs("results", exist_ok=True)
 	logging.basicConfig(
 		level=logging.DEBUG, filename="results/compare.log", encoding="utf-8",
-		datefmt="%m-%d %H:%M:%S", format="%(asctime)s %(levelname)-5.5s %(message)s")
+		datefmt="%m-%d %H:%M:%S", format="%(asctime)s %(process)-05d %(levelname)-5.5s %(message)s")
 	logging.getLogger().addHandler(logging.StreamHandler())
 	logging.getLogger("filelock").setLevel(logging.WARNING)
 	logging.getLogger("matplotlib").setLevel(logging.WARNING)

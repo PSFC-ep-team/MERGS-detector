@@ -3,12 +3,13 @@ from concurrent.futures import ProcessPoolExecutor
 import json
 import os
 import logging
+from time import time
 from typing import Callable, Literal
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, diff, interp, \
-	quantile, nanmax, geomspace, percentile, inf, nan, histogram
+	quantile, nanmax, geomspace, percentile, inf, nan, histogram, log, isnan
 from scipy import optimize
 from scipy.special import erf
 
@@ -17,12 +18,13 @@ from detector import calculate_sensitivity, Detector, calculate_response
 from simulation import Beam, Spectrum
 
 
-plt.rcParams["font.size"] = 12
+plt.rcParams["font.size"] = 11
 
 FOCAL_PLANE_HEIGHT = 10  # cm
 ELECTRON_RATE = 2.87e+10*2.4e-5*1.0e-4/10  # particle/channel/s
 
 data = loadtxt("data/background-spectrum.csv", skiprows=1, delimiter=",", quotechar='"')
+BACKGROUND_BIN_WIDTHS = data[:, 1] - data[:, 0]
 BACKGROUND_NEUTRON_SPECTRUM = Spectrum(
 	"scattered neuts", (data[:, 0] + data[:, 1])/2, data[:, 2])
 BACKGROUND_PHOTON_SPECTRUM = Spectrum(
@@ -46,17 +48,12 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 
 	# plot the pareto fronts of performance
 	logging.info("Generating final plots...")
-	for material in fronts.keys():
-		i = len(fronts[material][False])//2
-		width, depth, length, lower_threshold, upper_threshold, _, _ = fronts[material][False][i, :]
-		plot_responses(Detector(material, width, depth, length, lower_threshold=lower_threshold, upper_threshold=upper_threshold), incident_energy=16.7)
-
 	for optimistic in [True, False]:
-		plt.figure()
+		plt.figure(figsize=(4, 4))
 		for material in fronts.keys():
 			plt.plot(
-				concatenate([[0], fronts[material][optimistic][:, 4]]),
 				concatenate([[0], fronts[material][optimistic][:, 5]]),
+				concatenate([[0], fronts[material][optimistic][:, 6]]),
 				styles[material], label=material)
 		plt.grid()
 		plt.xlim(0, 10)
@@ -70,10 +67,10 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 		# plot the actual design variables
 		fig, axs = plt.subplots(3, 1, sharex=True, gridspec_kw=dict(hspace=0))
 		for material in fronts.keys():
-			axs[0].plot(fronts[material][optimistic][:, 5], fronts[material][optimistic][:, 0], styles[material], label=material)
-			axs[1].plot(fronts[material][optimistic][:, 5], fronts[material][optimistic][:, 1], styles[material])
-			axs[2].plot(fronts[material][optimistic][:, 5], fronts[material][optimistic][:, 2], styles[material])
-			axs[2].plot(fronts[material][optimistic][:, 5], fronts[material][optimistic][:, 3], styles[material])
+			axs[0].plot(fronts[material][optimistic][:, 6], fronts[material][optimistic][:, 0], styles[material], label=material)
+			axs[1].plot(fronts[material][optimistic][:, 6], fronts[material][optimistic][:, 2], styles[material])
+			axs[2].plot(fronts[material][optimistic][:, 6], fronts[material][optimistic][:, 3], styles[material])
+			axs[2].plot(fronts[material][optimistic][:, 6], fronts[material][optimistic][:, 4], styles[material])
 		axs[0].legend()
 		axs[0].grid()
 		axs[0].set_ylabel("Width (cm)")
@@ -89,6 +86,31 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 		fig.tight_layout()
 		plt.savefig(f"figures/pareto_parameters_{'optimistic' if optimistic else 'conservative'}_{'spectrometer' if spectrometric else 'detector'}.pdf")
 
+	# plot the response histograms
+	for material in fronts.keys():
+		i = len(fronts[material][False])//2
+		width, length, depth, lower_threshold, upper_threshold, _, _ = fronts[material][False][i, :]
+		if not isnan(width):
+			plot_responses(Detector(material, width, length, depth, lower_threshold=lower_threshold, upper_threshold=upper_threshold), incident_energy=16.7)
+
+	# plot the background data
+	plt.figure(figsize=(4.0, 3.0))
+	plt.grid()
+	vmax = 0
+	for spectrum, color, label in [(BACKGROUND_PHOTON_SPECTRUM, "tab:green", "Photons"), (BACKGROUND_NEUTRON_SPECTRUM, "tab:gray", "Neutrons")]:
+		x = spectrum.energies
+		y = spectrum.probabilities/100/BACKGROUND_BIN_WIDTHS
+		plt.plot(x, y, color, zorder=2, label=label)
+		vmax = max(vmax, y[x > 1].max())
+	plt.legend()
+	plt.ylim(0, vmax)
+	plt.ylabel("Spectrum (MeV⁻¹·cm⁻²·s⁻¹)")
+	plt.xlim(0, 20)
+	plt.xlabel("Energy (MeV)")
+	plt.tight_layout()
+	plt.savefig(f"figures/background.pdf")
+
+	logging.info("done!")
 
 def plot_responses(detector: Detector, incident_energy: float, num_background_particles=5_000_000):
 	""" plot the response of a given detector design to all three kinds of radiation """
@@ -105,7 +127,7 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	photon_weight = PHOTON_FLUX_RATE*4*pi*world_radius**2/num_photons
 
 	energy_bins = linspace(0.05, min(17.05, 1.5*detector.upper_threshold), 86)
-	plt.figure()
+	plt.figure(figsize=(4.0, 3.0))
 	# plot the histograms
 	counts = {}
 	particles = [
@@ -115,7 +137,7 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 		(neutron_response, neutron_weight, "tab:gray", "Neutrons"),
 	]
 	for response, weight, color, label in particles:
-		counts[label] = weight*histogram(response, energy_bins, density=True)[0]
+		counts[label] = weight*histogram(response, energy_bins)[0]/diff(energy_bins)
 		plt.stairs(counts[label], energy_bins, fill=True, color=color, alpha=1/4, label=label)
 	for response, weight, color, label in particles:
 		plt.stairs(counts[label], energy_bins, fill=False, color=color, alpha=1)
@@ -124,19 +146,21 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	plt.axvline(detector.upper_threshold, linestyle="--", color="k")
 	# plot the energy uncertainty at each threshold
 	efficiency = MATERIAL_DATA[detector.material_name]["efficiency"]
+	vmax = max(count[energy_bins[1:] > detector.lower_threshold].max() for count in counts.values())
 	plt.errorbar(
-		detector.lower_threshold, counts["Signal"].max()*2/3,
+		detector.lower_threshold, min(vmax*2/3, counts["Signal"].max()),
 		xerr=sqrt(detector.lower_threshold/efficiency), color="k", capsize=5)
 	plt.errorbar(
-		detector.upper_threshold, counts["Signal"].max()*2/3,
+		detector.upper_threshold, min(vmax*2/3, counts["Signal"].max()),
 		xerr=sqrt(detector.upper_threshold/efficiency), color="k", capsize=5)
 	# adjust the axes
 	plt.xlim(0, min(1.5*detector.upper_threshold, 18))
-	plt.ylim(0, max(count[energy_bins[1:] > detector.lower_threshold].max() for count in counts.values())*1.05)
+	if counts["Signal"].max() < vmax/10:
+		plt.yscale("symlog", linthresh=counts["Signal"].max(), linscale=1/log(10))
+	plt.ylim(0, vmax*1.05)
 	plt.legend()
 	plt.xlabel("Deposited energy (MeV)")
-	plt.ylabel("Counts (/MeV/s)")
-	plt.title(f"{detector.width:.1f} cm × {detector.length:.1f} cm × {detector.depth:.1f} cm {detector.material_name} detector")
+	plt.ylabel("Counts (MeV⁻¹·s⁻¹)")
 	plt.tight_layout()
 	filename = f"figures/{detector.material_name}_{detector.width:.1f}cmx{detector.length:.1f}cmx{detector.depth:.1f}cm_response.pdf"
 	plt.savefig(filename)
@@ -175,6 +199,7 @@ def find_pareto_front(material: str, optimistic: bool, spectrometric: bool) -> l
 			except TimeoutError:
 				logging.warning("I think this thread may have crashed?  I'm really sorry; I don't know what to do about that.")
 				designs.append([nan, nan, nan, nan, nan, inf, inf])
+	logging.debug(f"closing out {num_processes} parallel processes")
 	return designs
 
 
@@ -208,7 +233,6 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 		logging.debug("loaded a cached optimized detector")
 
 	except FileNotFoundError:
-		logging.debug(f"commencing a new {'optimistic' if optimistic else 'conservative'} {material} {mode} optimization for {signal_sensitivity:.0%} sensitivity and {spectroscopic_quality:.0%} spectrometry for {incident_energy:.1f} MeV electrons")
 		coincidence_counting = optimistic
 		pulse_shape_discrimination = optimistic and material.startswith("EJ")
 		if mode == "any":
@@ -224,10 +248,18 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 				return min(solutions, key=lambda solution: solution[-2])
 
 		else:
+			logging.debug(f"commencing a new {'optimistic' if optimistic else 'conservative'} {material} {mode} optimization for {signal_sensitivity:.0%} sensitivity and {spectroscopic_quality:.0%} spectrometry for {incident_energy:.1f} MeV electrons")
+			start_time = time()
 			try:
 				if mode == "block":
 					if material == "silicon":
 						raise RuntimeError("silicon detectors can't be manufactured that thick.")
+
+					# do a quick test to see if this is possible
+					best_possible_energy_deposition = calculate_thresholds(
+						material, 10, FOCAL_PLANE_HEIGHT + 10, 10, incident_energy, 100*(1 - spectroscopic_quality))[0]
+					if best_possible_energy_deposition < incident_energy - .6:
+						raise RuntimeError(f"Actually, {material} cannot possibly achieve {spectroscopic_quality:.0%} spectrometry for {incident_energy:.1f} MeV electrons")
 
 					# optimize with fixed thresholds
 					lower_percentile, upper_percentile = 100*(1 - signal_sensitivity), 100
@@ -241,7 +273,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 							lambda x: calculate_thresholds(
 								material, x[0], x[1], x[2], incident_energy, 100*(1 - spectroscopic_quality))[0],
 							lb=incident_energy - .6, ub=inf,
-						)],
+						)] if spectroscopic_quality > 0 else [],
 						x0=[4.0, 14.0, 6.0],
 						bounds=[
 							(0.5, 10.0),
@@ -278,13 +310,14 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 				else:
 					raise ValueError(f"undefined mode, {mode!r}; what _is_ that?")
 
+				end_time = time()
 				if not result.success:
-					logging.info(f"the optimization failed after {result.nfev} steps for signal sensitivity of {signal_sensitivity:.3g}; {result.message}")
-					raise RuntimeError(result.message)
+					raise RuntimeError(f"after {result.nfev} steps ({(end_time - start_time)/3600:.2g} hours), {result.message}")
 				else:
-					logging.info(f"after {result.nfev} steps, we found an optimum that achieves {signal_sensitivity:.3g} for signal, {result.fun:.3g} for background")
+					logging.info(f"after {result.nfev} steps ({(end_time - start_time)/3600:.2g} hours), we found an optimal {'optimistic' if optimistic else 'conservative'} {mode} that achieves {signal_sensitivity:.3g} for signal and {result.fun:.3g} for background")
 
-			except RuntimeError:
+			except RuntimeError as e:
+				logging.info(f"we failed to find a {'optimistic' if optimistic else 'conservative'} {mode} that achieves signal sensitivity {signal_sensitivity:.3g}; {e}")
 				with open(filename, "w") as file:
 					file.write("FAILURE")
 				raise
@@ -477,7 +510,7 @@ if __name__ == "__main__" or __name__ == "__mp_main__":
 	os.makedirs("results", exist_ok=True)
 	logging.basicConfig(
 		level=logging.DEBUG, filename="results/pareto.log", encoding="utf-8",
-		datefmt="%m-%d %H:%M:%S", format="%(asctime)s %(levelname)-5.5s %(message)s")
+		datefmt="%m-%d %H:%M:%S", format="%(asctime)s %(process)-05d %(levelname)-5.5s %(message)s")
 	logging.getLogger().addHandler(logging.StreamHandler())
 	logging.getLogger("filelock").setLevel(logging.WARNING)
 	logging.getLogger("matplotlib").setLevel(logging.WARNING)
