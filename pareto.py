@@ -7,7 +7,7 @@ from time import time
 from typing import Callable, Literal
 
 import matplotlib.pyplot as plt
-from matplotlib.ticker import LogLocator
+from matplotlib.ticker import LogLocator, MultipleLocator
 from numpy import pi, array, linspace, savetxt, loadtxt, sqrt, concatenate, diff, interp, \
 	quantile, nanmax, geomspace, percentile, inf, nan, histogram, log, isnan
 from scipy import optimize
@@ -49,7 +49,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 	# plot the pareto fronts of performance
 	logging.info("Generating final plots...")
 	for optimistic in [True, False]:
-		plt.figure(figsize=(4, 4))
+		plt.figure(figsize=(4.0, 4.0))
 		for material in fronts.keys():
 			plt.plot(
 				concatenate([[0], fronts[material][optimistic][:, 5]]),
@@ -94,7 +94,7 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 			plot_responses(Detector(material, width, length, depth, lower_threshold=lower_threshold, upper_threshold=upper_threshold), incident_energy=16.7)
 
 	# plot the background data
-	plt.figure(figsize=(4.0, 3.0))
+	plt.figure(figsize=(4.0, 2.5))
 	plt.grid()
 	vmax = 0
 	for spectrum, color, label in [(BACKGROUND_PHOTON_SPECTRUM, "tab:green", "Photons"), (BACKGROUND_NEUTRON_SPECTRUM, "tab:gray", "Neutrons")]:
@@ -103,9 +103,9 @@ def plot_pareto_fronts(materials: list[str], styles: dict[str, str], spectrometr
 		plt.plot(x, y, color, zorder=2, label=label)
 		vmax = max(vmax, y[x > 1].max())
 	plt.legend()
-	plt.ylim(0, vmax)
+	plt.ylim(0, vmax*1.1)
 	plt.ylabel("Spectrum (MeV⁻¹·cm⁻²·s⁻¹)")
-	plt.xlim(0, 20)
+	plt.xlim(0, 16.7)
 	plt.xlabel("Energy (MeV)")
 	plt.tight_layout()
 	plt.savefig(f"figures/background.pdf")
@@ -118,7 +118,7 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	electron_beam = Beam("electron", tight_spectrum(incident_energy), width=detector.width, height=FOCAL_PLANE_HEIGHT, shape="rectangular")
 	electron_response, crosstalk_response = calculate_response(detector, electron_beam, num_particles=num_electrons)
 	electron_weight = ELECTRON_RATE/num_electrons
-	world_radius = sqrt(detector.width**2 + detector.length**2 + detector.depth**2)/2
+	world_radius = sqrt((3*detector.width)**2 + detector.length**2 + detector.depth**2)/2
 	neutron_beam = Beam("neutron", BACKGROUND_NEUTRON_SPECTRUM, distance=world_radius, shape="ambient")
 	neutron_response, _ = calculate_response(detector, neutron_beam, num_particles=num_neutrons)
 	neutron_weight = NEUTRON_FLUX_RATE*4*pi*world_radius**2/num_neutrons
@@ -127,7 +127,7 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	photon_weight = PHOTON_FLUX_RATE*4*pi*world_radius**2/num_photons
 
 	energy_bins = linspace(0.05, min(17.05, 1.5*detector.upper_threshold), 86)
-	plt.figure(figsize=(4.0, 3.0))
+	plt.figure(figsize=(4.0, 2.5))
 	# plot the histograms
 	counts = {}
 	particles = [
@@ -157,6 +157,8 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	plt.xlim(0, min(1.5*detector.upper_threshold, 18))
 	if counts["Signal"].max() < vmax/10:
 		plt.yscale("symlog", linthresh=counts["Signal"].max(), linscale=1/log(10))
+		plt.gca().yaxis.set_major_locator(MultipleLocator(5))  # TODO write my own symlog locator
+		plt.gca().yaxis.set_major_formatter("{x:.0f}")
 	plt.ylim(0, vmax*1.05)
 	plt.legend()
 	plt.xlabel("Deposited energy (MeV)")
@@ -215,7 +217,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 	             - "strip" – a tiny detector designed to forsake spectral information and minimize background
 	             - "any" – it will pick whichever one has the best backgroud performance
 	:param incident_energy: the electron energy being optimized for (MeV)
-	:return: the width (cm), the length (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity, and the achieved signal sensitivity
+	:return: the width (cm), the length (cm), the depth (cm), the lower threshold (MeV), the upper threshold (MeV), the achieved background sensitivity (per signal electron), and the achieved signal sensitivity
 	"""
 	os.makedirs("results/detectors", exist_ok=True)
 
@@ -332,6 +334,7 @@ def optimize_detector(material: str, signal_sensitivity: float, spectroscopic_qu
 				"depth (cm)": depth,
 				"lower threshold (MeV)": lower_threshold,
 				"upper threshold (MeV)": upper_threshold,
+				"incident energy (MeV)": incident_energy,
 				"background sensitivity": background_sensitivity,
 				"signal sensitivity": signal_sensitivity,
 			}, file, indent="\t")
@@ -402,7 +405,8 @@ def calculate_background_sensitivity(
 		use_percentiles=True, num_background_particles=5_000_000,
 ) -> float:
 	"""
-	the background sensitivity of this detector assuming ambient neutrons and photons with a 1/E² spectrum
+	the background sensitivity of this detector assuming ambient neutrons and photons with a 1/E² spectrum,
+	expressed as the number of background counts per incident signal electron
 	"""
 	width = max(0.001, width)
 	depth = max(0.001, depth)
