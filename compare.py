@@ -77,9 +77,9 @@ def compare():
 
 
 def optimize_and_evaluate_detector(material: str, signal_sensitivity: float, spectrometric_quality: float, optimistic: bool, mode: Literal["any", "strip", "block"], energy: float) -> tuple[float, float]:
-	width, length, depth, lower_percentile, upper_percentile, _, _ = optimize_detector(material, signal_sensitivity, spectrometric_quality, optimistic, mode, energy)
+	width, length, depth, lower_threshold, upper_threshold, _, _ = optimize_detector(material, signal_sensitivity, spectrometric_quality, optimistic, mode, energy)
 	return evaluate_detector(
-		material, width, length, depth, lower_percentile, upper_percentile, energy, optimistic=optimistic,
+		material, width, length, depth, lower_threshold, upper_threshold, energy, optimistic=optimistic,
 		plot=energy == 16.7 and signal_sensitivity == .80 and optimistic)
 
 
@@ -126,9 +126,8 @@ def plot_detector_concept(
 	fig.savefig(f"figures/comparison-{material}-{signal_sensitivity*100:.0f}.pdf")
 
 
-def evaluate_detector(material: str, width: float, length: float, depth: float, lower_percentile: float, upper_percentile: float, incident_energy: float, optimistic: bool, plot=False) -> tuple[float, float]:
+def evaluate_detector(material: str, width: float, length: float, depth: float, lower_threshold: float, upper_threshold: float, incident_energy: float, optimistic: bool, plot=False) -> tuple[float, float]:
 	""" calculate the range of possible background levels (per signal particle) and the total count rate of this detector """
-	lower_threshold, upper_threshold = calculate_thresholds(material, width, length, depth, incident_energy, lower_percentile, upper_percentile)
 	num_background_particles = round(10_000_000/(width*depth*length)**(1/3))
 	background = calculate_background_sensitivity(
 		material, width, length, depth, lower_threshold, upper_threshold, incident_energy,
