@@ -7,8 +7,7 @@ import matplotlib.pyplot as plt
 from numpy import inf, array, empty, interp, loadtxt
 
 from detector import Detector
-from pareto import calculate_background_sensitivity, plot_responses, calculate_thresholds, optimize_detector, \
-	ELECTRON_RATE
+from optimization import calculate_background_sensitivity, plot_responses, optimize_detector, ELECTRON_RATE
 
 plt.rcParams["font.size"] = 11
 

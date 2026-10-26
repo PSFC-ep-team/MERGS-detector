@@ -20,7 +20,7 @@ There are also some tests in `simulation.py` that you can run with pytest:
 ```bash
 python -m pytest simulation.py
 python -m pytest detector.py
-python -m pytest pareto.py
+python -m pytest optimization.py
 ```
 
 A few directories are automaticly generated sometimes.  Specificly:
