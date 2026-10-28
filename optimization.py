@@ -146,7 +146,7 @@ def plot_responses(detector: Detector, incident_energy: float, num_background_pa
 	plt.axvline(detector.upper_threshold, linestyle="--", color="k")
 	# plot the energy uncertainty at each threshold
 	efficiency = MATERIAL_DATA[detector.material_name]["efficiency"]
-	vmax = max(count[energy_bins[1:] > detector.lower_threshold].max() for count in counts.values())
+	vmax = max(count[energy_bins[1:] >= detector.lower_threshold*2/3].max() for count in counts.values())
 	plt.errorbar(
 		detector.lower_threshold, min(vmax*2/3, counts["Signal"].max()),
 		xerr=sqrt(detector.lower_threshold/efficiency), color="k", capsize=5)
@@ -437,7 +437,7 @@ def calculate_background_sensitivity(
 		total_detection_rate_var += (PHOTON_FLUX_RATE*4*pi*world_radius**2*photon_sensitivity_unc)**2
 
 	total_detection_rate_unc = sqrt(total_detection_rate_var)
-	if total_detection_rate_unc > .10*total_detection_rate:
+	if total_detection_rate_unc > max(.10*total_detection_rate, .10*ELECTRON_RATE):
 		logging.warning(
 			f"when calculating the sensitivity of a {detector.width:.2g}×{detector.length:.2g}×{detector.depth:.2g} cm "
 			f"{detector.material_name} detector to background, counting only particles between "

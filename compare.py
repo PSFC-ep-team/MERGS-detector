@@ -4,7 +4,7 @@ import os
 from typing import Literal
 
 import matplotlib.pyplot as plt
-from numpy import inf, array, empty, interp, loadtxt
+from numpy import inf, array, empty, interp, loadtxt, median
 
 from detector import Detector
 from optimization import calculate_background_sensitivity, plot_responses, optimize_detector, ELECTRON_RATE
@@ -88,10 +88,14 @@ def plot_detector_concept(
 	fig, axs = plt.subplots(nrows=2, ncols=1, sharex="all", gridspec_kw=dict(hspace=0), figsize=(5.0, 5.0))
 
 	for mode, color, label in [("block", "#dfa11a", "Large detector"), ("strip", "#3382d7", "Strip detector")]:
-		axs[0].plot(incident_energies, count_rates[mode], color, label=label)
+		axs[0].plot(incident_energies, count_rates[mode] - ELECTRON_RATE, color, label=label)
+	axs[0].plot(
+		spectrum_energy, ELECTRON_RATE*spectrum/spectrum.max(),
+		color="k", linewidth=1.5, linestyle="dashed", label="Signal")
 	axs[0].grid()
 	axs[0].legend()
 	axs[0].set_yscale("log")
+	axs[0].set_ylim(ELECTRON_RATE/3, median(count_rates["block"])*3)
 	axs[0].set_ylabel("Total count rate (s⁻¹)")
 	axs[0].xaxis.set_ticks_position("none")
 
@@ -105,7 +109,7 @@ def plot_detector_concept(
 		axs[1].plot(
 			incident_energies,
 			ELECTRON_RATE*conservative_background_levels[mode],
-			color, linewidth=1, label=f"{label} background")
+			color, linewidth=1, label=label)
 		axs[1].plot(
 			incident_energies,
 			ELECTRON_RATE*optimistic_background_levels[mode],
@@ -117,6 +121,7 @@ def plot_detector_concept(
 	axs[1].grid()
 	axs[1].legend()
 	axs[1].set_yscale("log")
+	axs[1].set_ylim(ELECTRON_RATE*signal_sensitivity/10, ELECTRON_RATE*conservative_background_levels["block"].max()*3)
 	axs[1].set_ylabel("Thresholded count rate (s⁻¹)")
 	axs[1].set_xlim(10, 18)
 	axs[1].set_xlabel("Electron energy (MeV)")
