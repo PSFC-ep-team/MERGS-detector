@@ -23,7 +23,7 @@ for i in $(seq 1 11); do
   	  find run -mmin +60 -delete
     fi
 	# run the script
-	timeout 1.0h python -u pareto.py $@
+	timeout 1.0h python -u optimization.py $@
 	# decide whether to keep going
 	EXIT_CODE=$?
 	if [ $EXIT_CODE -eq 124 ]; then
@@ -35,5 +35,5 @@ for i in $(seq 1 11); do
 done
 
 echo "Our time is up but there's more work to do.  Recuing..."
-sbatch pareto.sh $@
+sbatch optimization.sh $@
 exit 0
